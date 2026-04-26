@@ -8,7 +8,5 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua
 COPY py/ .
 COPY json/ /app/json/
 
-VOLUME ["/app/config.yml"]
-
 ENTRYPOINT ["python"]
 CMD ["get_seat_tomorrow_mode_1.py"]
