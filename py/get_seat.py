@@ -209,12 +209,35 @@ def check_book_seat():
         logger.error("获取个人座位出现错误")
 
 
-async def get_server_time_offset(session=None):
-    global SERVER_TIME_OFFSET
-    try:
-        if session is None:
-            async with aiohttp.ClientSession() as session:
-                return await _fetch_server_time(session)
+# 状态检测函数，用来检查响应结果
+def check_reservation_status():
+    global FLAG, MESSAGE
+    # 状态信息检测
+    if isinstance(SEAT_RESULT, dict) and "msg" in SEAT_RESULT:
+        status = SEAT_RESULT["msg"]
+        # logger.info("预约状态：" + str(status))
+        if status is not None:
+            if status == "当前用户在该时段已存在座位预约，不可重复预约":
+                logger.info("重复预约, 请检查选择的时间段或是否已经预约成功")
+                check_book_seat()
+                FLAG = True
+            elif status == "预约成功":
+                logger.info("预约成功")
+                check_book_seat()
+                FLAG = True
+            elif status == "开放预约时间19:20":
+                logger.info("未到预约时间")
+            elif status == "您尚未登录":
+                logger.info("没有登录，将重新尝试获取 token")
+                get_auth_token()
+            elif status == "该空间当前状态不可预约":
+                logger.info("此位置已被预约或位置不可用")
+            elif status == "取消成功":
+                logger.info("取消成功")
+                sys.exit()
+            else:
+                FLAG = True
+                logger.info(f"未知状态信息: {status}")
         else:
             return await _fetch_server_time(session)
     except Exception as e:
@@ -273,27 +296,139 @@ async def async_post_to_get_seat(session, select_id, segment, auth_token):
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,pl;q=0.5",
         "Authorization": auth_token,
     }
-    
-    return await async_post(session, URL_GET_SEAT, post_data, request_headers)
+    # 发送POST请求并获取响应
+    SEAT_RESULT = send_post_request_and_save_response(URL_GET_SEAT, post_data, request_headers)
+    check_reservation_status()
 
 
-async def precise_sleep(target_time, session=None, enable_realtime_calibration=True):
-    global SERVER_TIME_OFFSET
-    
-    if enable_realtime_calibration and session:
-        await get_server_time_offset(session)
-    
-    now = datetime.datetime.now()
-    delta = (target_time - now).total_seconds()
-    
-    if delta > 5:
-        for _ in range(int(delta // 2)):
-            await asyncio.sleep(2)
-            if enable_realtime_calibration and session:
-                await get_server_time_offset(session)
-            now = datetime.datetime.now()
-            delta = (target_time - now).total_seconds()
-            if delta <= 5:
+# 随机获取座位
+def random_get_seat(data):
+    global MESSAGE
+    # 随机选择一个字典
+    random_dict = random.choice(data)
+    # 获取该字典中 'id' 键对应的值
+    select_id = random_dict["id"]
+    # seat_no = random_dict['no']
+    # logger.info(f"随机选择的座位为: {select_id} 真实位置: {seat_no}")
+    return select_id
+
+
+# 选座主要逻辑
+def select_seat(build_id, segment, nowday):
+    global MESSAGE, FLAG
+    retries = 0  # 添加重试计数器
+
+    while not FLAG and retries < 100:
+        logger.info(f"开始第 {retries+1} 次尝试获取座位")
+        retries += 1
+
+        # 获取空闲位置
+        data = get_seat_info(build_id, segment, nowday)
+        # print(f'info:   空闲位置: {data}, {len(data)}')
+
+        if not data:
+            logger.warning("获取座位信息失败，可能是时间段内不存在或该区域暂不可用")
+
+            for key, value in classroom_id_mapping.items():
+                if value == build_id:
+                    classname = key
+                    break
+            MESSAGE += f"\n[{classname}]: 获取座位信息失败，可能是时间段内不存在或该区域暂不可用"
+            # send_message()
+            break
+            # sys.exit()
+        else:
+            # 模式 1: 选择指定范围内有插座的位置
+            if MODE == '1':
+                seat_id_range = []
+                for ran in SEAT_ID:
+                    seat_id_range.extend(list(map(str, list(range(ran[0], ran[1]+1)))))
+                
+                # 位置筛选条件
+                new_data = [d for d in data if (d["id"] not in EXCLUDE_ID) and (d['id'] in seat_id_range)]
+                # print(f'info:   位置范围: {seat_id_range}')
+                # print(f'info:   指定范围内有插座位置: {new_data}')
+                # break
+
+                if new_data:
+                    select_id = random_get_seat(new_data)
+                    logger.info(f"随机选择的座位为: {select_id}")
+                    post_to_get_seat(select_id, segment)
+                continue
+            # 模式 2: 选择有插座的位置
+            elif MODE == '2':
+                # 位置筛选条件
+                new_data = [d for d in data if d["id"] not in EXCLUDE_ID]
+                if new_data:
+                    select_id = random_get_seat(new_data)
+                    logger.info(f"随机选择的座位为: {select_id}")
+                    post_to_get_seat(select_id, segment)
+                continue
+            # 模式 3: 随机选择
+            elif MODE == '3':
+                select_id = random_get_seat(data)
+                logger.info(f"随机选择的座位为: {select_id}")
+                post_to_get_seat(select_id, segment)
+                continue
+            # 模式 4: 东校区图书馆三层自习室指定座位优先
+            elif MODE == '4':
+                # 东校区图书馆三层自习室的build_id是22
+                if build_id != 22:
+                    logger.info("模式4只适用于东校区图书馆三层自习室，跳过当前教室")
+                    continue
+                
+                # 调试：打印实际返回的座位信息
+                if data:
+                    logger.info(f"调试: 实际返回的前5个座位: {data[:5]}")
+                
+                # 合并所有指定座位列表
+                target_seats = ['228']
+                # 合并所有优先座位列表
+                priority_seats = ['228']
+                
+                # 筛选出在指定座位列表中的空闲座位（根据no字段，去除前导零进行比较）
+                available_target_seats = []
+                for seat in data:
+                    # 去除no字段的前导零
+                    seat_no = seat['no'].lstrip('0')
+                    # 如果去除前导零后为空，则表示是0号座位
+                    if not seat_no:
+                        seat_no = '0'
+                    if seat_no in target_seats:
+                        available_target_seats.append(seat)
+                
+                # 调试：打印筛选结果
+                logger.info(f"调试: 可用座位数量: {len(data)}, 符合条件的座位数量: {len(available_target_seats)}")
+                if available_target_seats:
+                    logger.info(f"调试: 符合条件的座位: {[(seat['id'], seat['no']) for seat in available_target_seats]}")
+                
+                if available_target_seats:
+                    # 优先选择优先座位列表中的座位
+                    priority_available = []
+                    for seat in available_target_seats:
+                        # 去除no字段的前导零
+                        seat_no = seat['no'].lstrip('0')
+                        if not seat_no:
+                            seat_no = '0'
+                        if seat_no in priority_seats:
+                            priority_available.append(seat)
+                    
+                    if priority_available:
+                        # 随机选择一个优先座位
+                        selected_seat = random.choice(priority_available)
+                        select_id = selected_seat["id"]
+                        logger.info(f"优先选择的座位为: {selected_seat['no']} (系统ID: {select_id})")
+                    else:
+                        # 没有优先座位时，从指定座位中随机选择
+                        selected_seat = random.choice(available_target_seats)
+                        select_id = selected_seat["id"]
+                        logger.info(f"从指定座位中选择的座位为: {selected_seat['no']} (系统ID: {select_id})")
+                    post_to_get_seat(select_id, segment)
+                else:
+                    logger.info("指定座位列表中无可用座位，立即重试")
+                continue
+            else:
+                logger.error(f"未知的模式: {MODE}")
                 break
         
         if delta > 5:
@@ -337,108 +472,22 @@ async def preheat_requests(session, segment, auth_token):
             aes_data = await async_encrypt(str(origin_data))
             post_data = {"aesjson": aes_data}
             
-            async with session.post(URL_GET_SEAT, json=post_data, headers=request_headers, timeout=aiohttp.ClientTimeout(total=2)) as resp:
-                try:
-                    result = await resp.json()
-                    if isinstance(result, dict) and "msg" in result:
-                        if result["msg"] == "预约成功":
-                            logger.info("预热阶段预约成功！")
-                            FLAG = True
-                            MESSAGE += "\n座位预约成功\n"
-                            check_book_seat()
-                            send_message()
-                            return True
-                        elif result["msg"] == "当前用户在该时段已存在座位预约，不可重复预约":
-                            logger.info("已存在预约")
-                            FLAG = True
-                            check_book_seat()
-                            send_message()
-                            return True
-                except:
-                    pass
-        except:
-            pass
-    
-    return False
+
+    # 如果超过最大重试次数仍然没有获取到座位,则退出程序
+    if retries >= 1000:
+        logger.error("超过最大重试次数,无法获取座位")
+        MESSAGE += "\n超过最大重试次数,无法获取座位"
+        send_message()
+        sys.exit()
 
 
-async def select_seat_concurrent(build_id, segment, nowday):
-    global MESSAGE, FLAG, PREHEAT_DONE
-    
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=200)) as session:
-        target_time = datetime.datetime.now().replace(hour=19, minute=20, second=0, microsecond=0)
-        if datetime.datetime.now() > target_time:
-            target_time = target_time + datetime.timedelta(days=1)
-        
-        adjusted_target = target_time + datetime.timedelta(seconds=SERVER_TIME_OFFSET)
-        preheat_start_time = adjusted_target - datetime.timedelta(milliseconds=550)
-        
-        logger.info(f"目标时间: {target_time}")
-        logger.info(f"初始服务器偏移: {SERVER_TIME_OFFSET:+.3f}秒")
-        logger.info(f"预热开始时间: {preheat_start_time}")
-        logger.info(f"正式抢座时间: {adjusted_target}")
-        
-        await precise_sleep(preheat_start_time, session)
-        
-        preheat_task = asyncio.create_task(preheat_requests(session, segment, AUTH_TOKEN))
-        
-        await precise_sleep(adjusted_target, session)
-        
-        PREHEAT_DONE = True
-        
-        if FLAG:
-            return
-        
-        logger.info("正式抢座开始...")
-        
-        tasks = []
-        
-        if PRIORITY_SEAT_ID and PRIORITY_SEAT_ID in TARGET_SEAT_IDS:
-            for _ in range(5):
-                tasks.append(asyncio.create_task(async_post_to_get_seat(session, PRIORITY_SEAT_ID, segment, AUTH_TOKEN)))
-        
-        for seat_id in TARGET_SEAT_IDS:
-            if seat_id != PRIORITY_SEAT_ID:
-                for _ in range(10):
-                    tasks.append(asyncio.create_task(async_post_to_get_seat(session, seat_id, segment, AUTH_TOKEN)))
-        
-        completed, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        
-        for task in completed:
-            try:
-                result = task.result()
-                if result is None:
-                    continue
-                if isinstance(result, dict) and "msg" in result:
-                    if result["msg"] == "预约成功":
-                        for p in pending:
-                            p.cancel()
-                        
-                        FLAG = True
-                        logger.info(f"座位预约成功")
-                        MESSAGE += "\n座位预约成功\n"
-                        check_book_seat()
-                        send_message()
-                        return
-                    elif result["msg"] == "当前用户在该时段已存在座位预约，不可重复预约":
-                        for p in pending:
-                            p.cancel()
-                        
-                        FLAG = True
-                        logger.info("已存在预约")
-                        check_book_seat()
-                        send_message()
-                        return
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.error(f"处理结果时异常: {str(e)}")
-        
-        for p in pending:
-            p.cancel()
+def check_time():
+    global MESSAGE
+    get_info_and_select_seat()
 
 
-async def get_info_and_select_seat():
+# 主函数
+def get_info_and_select_seat():
     global AUTH_TOKEN, NEW_DATE, MESSAGE
     try:
         NEW_DATE = get_date(DATE)
