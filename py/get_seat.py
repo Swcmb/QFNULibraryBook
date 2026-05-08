@@ -47,6 +47,9 @@ TARGET_SEAT_IDS = []
 PRIORITY_SEAT_ID = ""
 MAX_CONCURRENT_REQUESTS = 10
 
+SERVER_TIME_OFFSET = 0
+PREHEAT_DONE = False
+
 
 def read_config_from_yaml():
     global CHANNEL_ID, TELEGRAM_BOT_TOKEN, CLASSROOMS_NAME, MODE, SEAT_ID, DATE, USERNAME, PASSWORD, GITHUB, BARK_EXTRA, BARK_URL, ANPUSH_TOKEN, ANPUSH_CHANNEL, PUSH_METHOD, DD_BOT_TOKEN, DD_BOT_SECRET, TARGET_SEAT_IDS, PRIORITY_SEAT_ID, MAX_CONCURRENT_REQUESTS
@@ -206,6 +209,38 @@ def check_book_seat():
         logger.error("获取个人座位出现错误")
 
 
+async def get_server_time_offset(session=None):
+    global SERVER_TIME_OFFSET
+    try:
+        if session is None:
+            async with aiohttp.ClientSession() as session:
+                return await _fetch_server_time(session)
+        else:
+            return await _fetch_server_time(session)
+    except Exception as e:
+        logger.error(f"获取服务器时间失败: {str(e)}")
+        return SERVER_TIME_OFFSET
+
+
+async def _fetch_server_time(session):
+    global SERVER_TIME_OFFSET
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
+    }
+    async with session.get(URL_GET_SEAT, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+        if resp.headers.get("Date"):
+            server_time_str = resp.headers["Date"]
+            server_time = datetime.datetime.strptime(server_time_str, "%a, %d %b %Y %H:%M:%S %Z")
+            server_time = server_time.replace(tzinfo=datetime.timezone.utc)
+            local_time = datetime.datetime.now(datetime.timezone.utc)
+            offset = (server_time - local_time).total_seconds()
+            SERVER_TIME_OFFSET = offset
+            logger.debug(f"实时校准 - 服务器时间偏移: {offset:+.3f}秒")
+            return offset
+    return SERVER_TIME_OFFSET
+
+
 async def async_post(session, url, json_data, headers):
     try:
         async with session.post(url, json=json_data, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
@@ -242,72 +277,165 @@ async def async_post_to_get_seat(session, select_id, segment, auth_token):
     return await async_post(session, URL_GET_SEAT, post_data, request_headers)
 
 
-async def precise_sleep(target_time):
+async def precise_sleep(target_time, session=None, enable_realtime_calibration=True):
+    global SERVER_TIME_OFFSET
+    
+    if enable_realtime_calibration and session:
+        await get_server_time_offset(session)
+    
     now = datetime.datetime.now()
     delta = (target_time - now).total_seconds()
     
-    if delta > 2:
-        await asyncio.sleep(delta - 1)
+    if delta > 5:
+        for _ in range(int(delta // 2)):
+            await asyncio.sleep(2)
+            if enable_realtime_calibration and session:
+                await get_server_time_offset(session)
+            now = datetime.datetime.now()
+            delta = (target_time - now).total_seconds()
+            if delta <= 5:
+                break
+        
+        if delta > 5:
+            await asyncio.sleep(delta - 5)
+            if enable_realtime_calibration and session:
+                await get_server_time_offset(session)
+        
         now = datetime.datetime.now()
         delta = (target_time - now).total_seconds()
     
-    if delta > 0.05:
-        await asyncio.sleep(delta - 0.02)
+    if delta > 0.1:
+        await asyncio.sleep(delta - 0.03)
+        if enable_realtime_calibration and session:
+            await get_server_time_offset(session)
     
     while datetime.datetime.now() < target_time:
         pass
 
 
-async def select_seat_concurrent(build_id, segment, nowday):
-    global MESSAGE, FLAG
+async def preheat_requests(session, segment, auth_token):
+    global FLAG, PREHEAT_DONE, MESSAGE
+    logger.info("开始预热请求...")
     
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=200)) as session:
-        while not FLAG:
-            tasks = []
+    request_headers = {
+        "Content-Type": "application/json",
+        "Connection": "keep-alive",
+        "Accept": "application/json, text/plain, */*",
+        "lang": "zh",
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
+        "Origin": "http://libyy.qfnu.edu.cn",
+        "Referer": "http://libyy.qfnu.edu.cn/h5/index.html",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,pl;q=0.5",
+        "Authorization": auth_token,
+    }
+    
+    while not PREHEAT_DONE and not FLAG:
+        try:
+            origin_data = '{{"seat_id":"{}","segment":"{}"}}'.format(PRIORITY_SEAT_ID, segment)
+            aes_data = await async_encrypt(str(origin_data))
+            post_data = {"aesjson": aes_data}
             
-            if PRIORITY_SEAT_ID and PRIORITY_SEAT_ID in TARGET_SEAT_IDS:
-                for _ in range(5):
-                    tasks.append(asyncio.create_task(async_post_to_get_seat(session, PRIORITY_SEAT_ID, segment, AUTH_TOKEN)))
-            
-            for seat_id in TARGET_SEAT_IDS:
-                if seat_id != PRIORITY_SEAT_ID:
-                    for _ in range(10):
-                        tasks.append(asyncio.create_task(async_post_to_get_seat(session, seat_id, segment, AUTH_TOKEN)))
-            
-            completed, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            
-            for task in completed:
+            async with session.post(URL_GET_SEAT, json=post_data, headers=request_headers, timeout=aiohttp.ClientTimeout(total=2)) as resp:
                 try:
-                    result = task.result()
-                    if result is None:
-                        continue
+                    result = await resp.json()
                     if isinstance(result, dict) and "msg" in result:
                         if result["msg"] == "预约成功":
-                            for p in pending:
-                                p.cancel()
-                            
+                            logger.info("预热阶段预约成功！")
                             FLAG = True
-                            logger.info(f"座位预约成功")
                             MESSAGE += "\n座位预约成功\n"
                             check_book_seat()
                             send_message()
-                            return
+                            return True
                         elif result["msg"] == "当前用户在该时段已存在座位预约，不可重复预约":
-                            for p in pending:
-                                p.cancel()
-                            
-                            FLAG = True
                             logger.info("已存在预约")
+                            FLAG = True
                             check_book_seat()
                             send_message()
-                            return
-                except asyncio.CancelledError:
+                            return True
+                except:
                     pass
-                except Exception as e:
-                    logger.error(f"处理结果时异常: {str(e)}")
-            
-            for p in pending:
-                p.cancel()
+        except:
+            pass
+    
+    return False
+
+
+async def select_seat_concurrent(build_id, segment, nowday):
+    global MESSAGE, FLAG, PREHEAT_DONE
+    
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=200)) as session:
+        target_time = datetime.datetime.now().replace(hour=19, minute=20, second=0, microsecond=0)
+        if datetime.datetime.now() > target_time:
+            target_time = target_time + datetime.timedelta(days=1)
+        
+        adjusted_target = target_time + datetime.timedelta(seconds=SERVER_TIME_OFFSET)
+        preheat_start_time = adjusted_target - datetime.timedelta(milliseconds=550)
+        
+        logger.info(f"目标时间: {target_time}")
+        logger.info(f"初始服务器偏移: {SERVER_TIME_OFFSET:+.3f}秒")
+        logger.info(f"预热开始时间: {preheat_start_time}")
+        logger.info(f"正式抢座时间: {adjusted_target}")
+        
+        await precise_sleep(preheat_start_time, session)
+        
+        preheat_task = asyncio.create_task(preheat_requests(session, segment, AUTH_TOKEN))
+        
+        await precise_sleep(adjusted_target, session)
+        
+        PREHEAT_DONE = True
+        
+        if FLAG:
+            return
+        
+        logger.info("正式抢座开始...")
+        
+        tasks = []
+        
+        if PRIORITY_SEAT_ID and PRIORITY_SEAT_ID in TARGET_SEAT_IDS:
+            for _ in range(5):
+                tasks.append(asyncio.create_task(async_post_to_get_seat(session, PRIORITY_SEAT_ID, segment, AUTH_TOKEN)))
+        
+        for seat_id in TARGET_SEAT_IDS:
+            if seat_id != PRIORITY_SEAT_ID:
+                for _ in range(10):
+                    tasks.append(asyncio.create_task(async_post_to_get_seat(session, seat_id, segment, AUTH_TOKEN)))
+        
+        completed, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        
+        for task in completed:
+            try:
+                result = task.result()
+                if result is None:
+                    continue
+                if isinstance(result, dict) and "msg" in result:
+                    if result["msg"] == "预约成功":
+                        for p in pending:
+                            p.cancel()
+                        
+                        FLAG = True
+                        logger.info(f"座位预约成功")
+                        MESSAGE += "\n座位预约成功\n"
+                        check_book_seat()
+                        send_message()
+                        return
+                    elif result["msg"] == "当前用户在该时段已存在座位预约，不可重复预约":
+                        for p in pending:
+                            p.cancel()
+                        
+                        FLAG = True
+                        logger.info("已存在预约")
+                        check_book_seat()
+                        send_message()
+                        return
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"处理结果时异常: {str(e)}")
+        
+        for p in pending:
+            p.cancel()
 
 
 async def get_info_and_select_seat():
@@ -316,6 +444,8 @@ async def get_info_and_select_seat():
         NEW_DATE = get_date(DATE)
         get_auth_token()
         
+        await get_server_time_offset()
+        
         for i in CLASSROOMS_NAME:
             build_id = get_build_id(i)
             if build_id != 22:
@@ -323,14 +453,6 @@ async def get_info_and_select_seat():
                 continue
             
             segment = get_segment(build_id, NEW_DATE)
-            
-            target_time = datetime.datetime.now().replace(hour=19, minute=20, second=0, microsecond=0)
-            if datetime.datetime.now() > target_time:
-                target_time = target_time + datetime.timedelta(days=1)
-            
-            logger.info(f"等待到 {target_time} 开始抢座...")
-            
-            await precise_sleep(target_time - datetime.timedelta(milliseconds=80))
             
             await select_seat_concurrent(build_id, segment, NEW_DATE)
 
