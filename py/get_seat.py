@@ -1,50 +1,36 @@
 import asyncio
 import datetime
+import json
 import logging
 import os
-import random
 import sys
 import time
 
-import requests
+import aiohttp
 import yaml
 from telegram import Bot
 
 from get_bearer_token import get_bearer_token
-from get_info import (
-    get_date,
-    get_seat_info,
-    get_segment,
-    get_build_id,
-    encrypt,
-    get_member_seat,
-    classroom_id_mapping,
-)
+from get_info import get_date, get_segment, get_build_id, encrypt, get_member_seat, classroom_id_mapping
 
-import json
 import base64
 import hmac
 import hashlib
 import urllib.parse
 
 
-
-# 配置日志
-logger = logging.getLogger("httpx")
-logger.setLevel(logging.ERROR)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 URL_GET_SEAT = "http://libyy.qfnu.edu.cn/api/Seat/confirm"
 URL_CHECK_OUT = "http://libyy.qfnu.edu.cn/api/Space/checkout"
 URL_CANCEL_SEAT = "http://libyy.qfnu.edu.cn/api/Space/cancel"
 
-# 配置文件
 CHANNEL_ID = ""
 TELEGRAM_BOT_TOKEN = ""
 MODE = ""
 CLASSROOMS_NAME = ""
-SEAT_ID = ""
+SEAT_ID = []
 DATE = ""
 USERNAME = ""
 PASSWORD = ""
@@ -57,19 +43,25 @@ DD_BOT_SECRET = ""
 DD_BOT_TOKEN = ""
 PUSH_METHOD = ""
 
+TARGET_SEAT_IDS = []
+PRIORITY_SEAT_ID = ""
+MAX_CONCURRENT_REQUESTS = 10
 
-# 读取YAML配置文件并设置全局变量
+SERVER_TIME_OFFSET = 0
+PREHEAT_DONE = False
+
+
 def read_config_from_yaml():
-    global CHANNEL_ID, TELEGRAM_BOT_TOKEN, CLASSROOMS_NAME, MODE, SEAT_ID, DATE, USERNAME, PASSWORD, GITHUB, BARK_EXTRA, BARK_URL, ANPUSH_TOKEN, ANPUSH_CHANNEL, PUSH_METHOD, DD_BOT_TOKEN, DD_BOT_SECRET
-    current_dir = os.path.dirname(os.path.abspath(__file__))  # 获取当前文件所在的目录的绝对路径
-    config_file_path = os.path.join(current_dir, "config.yml")  # 将文件名与目录路径拼接起来
-    with open(config_file_path, "r", encoding="utf-8") as yaml_file:  # 指定为UTF-8格式打开文件
+    global CHANNEL_ID, TELEGRAM_BOT_TOKEN, CLASSROOMS_NAME, MODE, SEAT_ID, DATE, USERNAME, PASSWORD, GITHUB, BARK_EXTRA, BARK_URL, ANPUSH_TOKEN, ANPUSH_CHANNEL, PUSH_METHOD, DD_BOT_TOKEN, DD_BOT_SECRET, TARGET_SEAT_IDS, PRIORITY_SEAT_ID, MAX_CONCURRENT_REQUESTS
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    config_file_path = os.path.join(current_dir, "config.yml")
+    with open(config_file_path, "r", encoding="utf-8") as yaml_file:
         config = yaml.safe_load(yaml_file)
         CHANNEL_ID = config.get("CHANNEL_ID", "")
         TELEGRAM_BOT_TOKEN = config.get("TELEGRAM_BOT_TOKEN", "")
-        CLASSROOMS_NAME = config.get("CLASSROOMS_NAME", [])  # 将 CLASSROOMS_NAME 读取为列表
+        CLASSROOMS_NAME = config.get("CLASSROOMS_NAME", [])
         MODE = config.get("MODE", "")
-        SEAT_ID = config.get("SEAT_ID", [])  # 将 SEAT_ID 读取为列表
+        SEAT_ID = config.get("SEAT_ID", [])
         DATE = config.get("DATE", "")
         USERNAME = config.get("USERNAME", "")
         PASSWORD = config.get("PASSWORD", "")
@@ -81,9 +73,12 @@ def read_config_from_yaml():
         DD_BOT_TOKEN = config.get("DD_BOT_TOKEN", "")
         DD_BOT_SECRET = config.get("DD_BOT_SECRET", "")
         PUSH_METHOD = config.get("PUSH_METHOD", "")
+        
+        TARGET_SEAT_IDS = config.get("TARGET_SEAT_IDS", ["228", "216", "204", "192"])
+        PRIORITY_SEAT_ID = config.get("PRIORITY_SEAT_ID", "228")
+        MAX_CONCURRENT_REQUESTS = config.get("MAX_CONCURRENT_REQUESTS", 10)
 
 
-# 在代码的顶部定义全局变量
 FLAG = False
 SEAT_RESULT = {}
 USED_SEAT = []
@@ -93,39 +88,66 @@ NEW_DATE = ""
 TOKEN_TIMESTAMP = None
 TOKEN_EXPIRY_DELTA = datetime.timedelta(hours=1, minutes=30)
 
-# 配置常量: 没有插座的座位ID
-EXCLUDE_ID = {
-    "7115","7120","7125","7130","7135","7140","7145","7150","7155","7160","7165","7170","7175","7180",
-    "7185","7190","7241","7244","7247","7250","7253","7256","7259","7262","7291","7296","7301","7306",
-    "7311","7316","7321","7326","7331","7336","7341","7346","7351","7356","7361","7366","7369","7372",
-    "7375","7378","7381","7384","7387","7390","7417","7420","7423","7426","7429","7432","7435","7438",
-    "7443","7448","7453","7458","7463","7468","7473","7478","7483","7488","7493","7498","7503","7508",
-    "7513","7518","7569","7572","7575","7578","7581","7584","7587","7590","7761","7764","7767","7770",
-    "7773","7776","7779","7782","7785","7788","7791","7794","7797","7800","7803","7806",
-    "7866","7867","7868","7869","7884","7885","7886","7887",
-}
+
+def dingtalk(text, desp, DD_BOT_TOKEN, DD_BOT_SECRET=None):
+    url = f"https://oapi.dingtalk.com/robot/send?access_token={DD_BOT_TOKEN}"
+    headers = {"Content-Type": "application/json"}
+    payload = {"msgtype": "text", "text": {"content": f"{text}\n{desp}"}}
+
+    if DD_BOT_TOKEN and DD_BOT_SECRET:
+        timestamp = str(round(time.time() * 1000))
+        secret_enc = DD_BOT_SECRET.encode("utf-8")
+        string_to_sign = f"{timestamp}\n{DD_BOT_SECRET}"
+        string_to_sign_enc = string_to_sign.encode("utf-8")
+        hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
+        sign = urllib.parse.quote_plus(base64.b64encode(hmac_code).decode("utf-8").strip())
+        url = f"{url}&timestamp={timestamp}&sign={sign}"
+
+    response = requests.post(url, headers=headers, data=json.dumps(payload))
+
+    try:
+        data = response.json()
+        if response.status_code == 200 and data.get("errcode") == 0:
+            logger.info("钉钉发送通知消息成功")
+        else:
+            logger.error(f"钉钉发送通知消息失败\n{data.get('errmsg')}")
+    except Exception as e:
+        logger.error(f"钉钉发送通知消息失败\n{e}")
+
+    return response.json()
 
 
-# post 请求
-def send_post_request_and_save_response(url, data, headers):
-    global MESSAGE
-    retries = 0
-    while retries < 100:
-        try:
-            response = requests.post(url, json=data, headers=headers, timeout=120)
-            response.raise_for_status()
-            response_data = response.json()
-            return response_data
-        except requests.exceptions.Timeout:
-            logger.error("请求超时，正在重试...")
-            retries += 1
-        except Exception as e:
-            logger.error(f"request请求异常: {str(e)}")
-            retries += 1
-    logger.error("超过最大重试次数,请求失败。")
-    MESSAGE += "\n超过最大重试次数,请求失败。"
-    send_message()
-    sys.exit()
+def send_message_bark():
+    try:
+        import requests
+        response = requests.get(BARK_URL + MESSAGE + BARK_EXTRA)
+        if response.status_code == 200:
+            logger.info("成功推送消息到 Bark")
+            return response.text
+        else:
+            logger.error(f"推送到 Bark 的 GET请求失败，状态码：{response.status_code}")
+            return None
+    except requests.exceptions.RequestException:
+        logger.info("GET请求异常, 你的 BARK 链接不正确")
+        return None
+
+
+def send_message_anpush():
+    import requests
+    url = "https://api.anpush.com/push/" + ANPUSH_TOKEN
+    payload = {"title": "预约通知", "content": MESSAGE, "channel": ANPUSH_CHANNEL}
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    requests.post(url, headers=headers, data=payload)
+
+
+async def send_message_telegram():
+    try:
+        bot = Bot(token=TELEGRAM_BOT_TOKEN)
+        await bot.send_message(chat_id=CHANNEL_ID, text=MESSAGE)
+        logger.info("成功推送消息到 Telegram")
+    except Exception as e:
+        logger.info(f"发送消息到 Telegram 失败")
+        return e
 
 
 def send_message():
@@ -139,93 +161,13 @@ def send_message():
         dingtalk(f"脚本执行通知 - 学号: {USERNAME}", MESSAGE, DD_BOT_TOKEN, DD_BOT_SECRET)
 
 
-# 推送到钉钉
-def dingtalk(text, desp, DD_BOT_TOKEN, DD_BOT_SECRET=None):
-    url = f"https://oapi.dingtalk.com/robot/send?access_token={DD_BOT_TOKEN}"
-    headers = {"Content-Type": "application/json"}
-    payload = {"msgtype": "text", "text": {"content": f"{text}\n{desp}"}}
-
-    if DD_BOT_TOKEN and DD_BOT_SECRET:
-        timestamp = str(round(time.time() * 1000))
-        secret_enc = DD_BOT_SECRET.encode("utf-8")
-        string_to_sign = f"{timestamp}\n{DD_BOT_SECRET}"
-        string_to_sign_enc = string_to_sign.encode("utf-8")
-        hmac_code = hmac.new(
-            secret_enc, string_to_sign_enc, digestmod=hashlib.sha256
-        ).digest()
-        sign = urllib.parse.quote_plus(
-            base64.b64encode(hmac_code).decode("utf-8").strip()
-        )
-        url = f"{url}&timestamp={timestamp}&sign={sign}"
-
-    response = requests.post(url, headers=headers, data=json.dumps(payload))
-
-    try:
-        data = response.json()
-        if response.status_code == 200 and data.get("errcode") == 0:
-            logger.info("钉钉发送通知消息成功🎉")
-        else:
-            logger.error(f"钉钉发送通知消息失败😞\n{data.get('errmsg')}")
-    except Exception as e:
-        logger.error(f"钉钉发送通知消息失败😞\n{e}")
-
-    return response.json()
-
-
-# 推送到 Bark
-def send_message_bark():
-    try:
-        response = requests.get(BARK_URL + MESSAGE + BARK_EXTRA)
-        # 检查响应状态码是否为200
-        if response.status_code == 200:
-            logger.info("成功推送消息到 Bark")
-            # 返回响应内容
-            return response.text
-        else:
-            logger.error(f"推送到 Bark 的 GET请求失败，状态码：{response.status_code}")
-            return None
-    except requests.exceptions.RequestException:
-        logger.info("GET请求异常, 你的 BARK 链接不正确")
-        return None
-
-
-def send_message_anpush():
-    url = "https://api.anpush.com/push/" + ANPUSH_TOKEN
-    payload = {"title": "预约通知", "content": MESSAGE, "channel": ANPUSH_CHANNEL}
-
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
-    requests.post(url, headers=headers, data=payload)
-    # logger.info(response.text)
-
-
-async def send_message_telegram():
-    try:
-        # 使用 API 令牌初始化您的机器人
-        bot = Bot(token=TELEGRAM_BOT_TOKEN)
-        # logger.info(f"要发送的消息为： {MESSAGE}\n")
-        await bot.send_message(chat_id=CHANNEL_ID, text=MESSAGE)
-        logger.info("成功推送消息到 Telegram")
-    except Exception as e:
-        logger.info(
-            f"发送消息到 Telegram 失败, 可能是没有设置此通知方式，也可能是没有连接到 Telegram"
-        )
-        return e
-
-
 def get_auth_token():
     global TOKEN_TIMESTAMP, AUTH_TOKEN, MESSAGE
     try:
-        # 如果未从配置文件中读取到用户名或密码，则抛出异常
         if not USERNAME or not PASSWORD:
             raise ValueError("未找到用户名或密码")
 
-        # 检查 Token 是否过期
-        if (
-            TOKEN_TIMESTAMP is None
-            or (datetime.datetime.now() - TOKEN_TIMESTAMP) > TOKEN_EXPIRY_DELTA
-        ):
-            # Token 过期或尚未获取，重新获取
+        if TOKEN_TIMESTAMP is None or (datetime.datetime.now() - TOKEN_TIMESTAMP) > TOKEN_EXPIRY_DELTA:
             name, token = get_bearer_token(USERNAME, PASSWORD)
             if token is None:
                 logging.error("获取 token 失败，账号密码错误或者网络错误。")
@@ -233,9 +175,8 @@ def get_auth_token():
                 send_message()
                 sys.exit()
             else:
-                logger.info(f"成功获取授权码")
+                logger.info("成功获取授权码")
                 AUTH_TOKEN = "bearer" + str(token)
-                # 更新 Token 的时间戳
                 TOKEN_TIMESTAMP = datetime.datetime.now()
         else:
             logger.info("使用现有授权码")
@@ -244,7 +185,6 @@ def get_auth_token():
         sys.exit()
 
 
-# 检查是否存在已经预约的座位
 def check_book_seat():
     global MESSAGE, FLAG
     try:
@@ -265,11 +205,6 @@ def check_book_seat():
                     logger.info("存在正在使用的座位")
                     FLAG = True
                     break
-                else:
-                    continue
-            # 测试规则不匹配的情况
-            # logger.info(res)
-        # todo 错误不明 需要提供日志
     except KeyError:
         logger.error("获取个人座位出现错误")
 
@@ -304,52 +239,62 @@ def check_reservation_status():
                 FLAG = True
                 logger.info(f"未知状态信息: {status}")
         else:
-            logger.info(SEAT_RESULT)
-    else:
-        logger.error(
-            "未能获取有效的座位预约状态，token已失效，请不要在脚本执行过程中手动登录"
-        )
-        MESSAGE += (
-            "\n未能获取有效的座位预约状态，token已失效，请不要在脚本执行过程中手动登录"
-        )
-        send_message()
-        sys.exit()
+            return await _fetch_server_time(session)
+    except Exception as e:
+        logger.error(f"获取服务器时间失败: {str(e)}")
+        return SERVER_TIME_OFFSET
 
 
-# 预约函数
-def post_to_get_seat(select_id, segment):
-    global SEAT_RESULT
-    # 原始数据
-    origin_data = '{{"seat_id":"{}","segment":"{}"}}'.format(select_id, segment)
-    # logger.info(origin_data)
-
-    # 加密数据
-    aes_data = encrypt(str(origin_data))
-    # aes_data = "test"
-    # logger.info(aes_data)
-
-    # 测试解密数据
-    # aes = decrypt(aes_data)
-    # logger.info(aes)
-
-    # 原始的 post_data
-    post_data = {
-        "aesjson": aes_data,
+async def _fetch_server_time(session):
+    global SERVER_TIME_OFFSET
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
     }
+    async with session.get(URL_GET_SEAT, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+        if resp.headers.get("Date"):
+            server_time_str = resp.headers["Date"]
+            server_time = datetime.datetime.strptime(server_time_str, "%a, %d %b %Y %H:%M:%S %Z")
+            server_time = server_time.replace(tzinfo=datetime.timezone.utc)
+            local_time = datetime.datetime.now(datetime.timezone.utc)
+            offset = (server_time - local_time).total_seconds()
+            SERVER_TIME_OFFSET = offset
+            logger.debug(f"实时校准 - 服务器时间偏移: {offset:+.3f}秒")
+            return offset
+    return SERVER_TIME_OFFSET
+
+
+async def async_post(session, url, json_data, headers):
+    try:
+        async with session.post(url, json=json_data, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            return await resp.json()
+    except Exception as e:
+        logger.error(f"异步请求异常: {str(e)}")
+        return None
+
+
+async def async_encrypt(text):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, encrypt, text)
+
+
+async def async_post_to_get_seat(session, select_id, segment, auth_token):
+    origin_data = '{{"seat_id":"{}","segment":"{}"}}'.format(select_id, segment)
+    aes_data = await async_encrypt(str(origin_data))
+    
+    post_data = {"aesjson": aes_data}
     request_headers = {
         "Content-Type": "application/json",
         "Connection": "keep-alive",
         "Accept": "application/json, text/plain, */*",
         "lang": "zh",
         "X-Requested-With": "XMLHttpRequest",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, "
-        "like Gecko)"
-        "Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
         "Origin": "http://libyy.qfnu.edu.cn",
         "Referer": "http://libyy.qfnu.edu.cn/h5/index.html",
         "Accept-Encoding": "gzip, deflate",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,pl;q=0.5",
-        "Authorization": AUTH_TOKEN,
+        "Authorization": auth_token,
     }
     # 发送POST请求并获取响应
     SEAT_RESULT = send_post_request_and_save_response(URL_GET_SEAT, post_data, request_headers)
@@ -485,6 +430,47 @@ def select_seat(build_id, segment, nowday):
             else:
                 logger.error(f"未知的模式: {MODE}")
                 break
+        
+        if delta > 5:
+            await asyncio.sleep(delta - 5)
+            if enable_realtime_calibration and session:
+                await get_server_time_offset(session)
+        
+        now = datetime.datetime.now()
+        delta = (target_time - now).total_seconds()
+    
+    if delta > 0.1:
+        await asyncio.sleep(delta - 0.03)
+        if enable_realtime_calibration and session:
+            await get_server_time_offset(session)
+    
+    while datetime.datetime.now() < target_time:
+        pass
+
+
+async def preheat_requests(session, segment, auth_token):
+    global FLAG, PREHEAT_DONE, MESSAGE
+    logger.info("开始预热请求...")
+    
+    request_headers = {
+        "Content-Type": "application/json",
+        "Connection": "keep-alive",
+        "Accept": "application/json, text/plain, */*",
+        "lang": "zh",
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
+        "Origin": "http://libyy.qfnu.edu.cn",
+        "Referer": "http://libyy.qfnu.edu.cn/h5/index.html",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,pl;q=0.5",
+        "Authorization": auth_token,
+    }
+    
+    while not PREHEAT_DONE and not FLAG:
+        try:
+            origin_data = '{{"seat_id":"{}","segment":"{}"}}'.format(PRIORITY_SEAT_ID, segment)
+            aes_data = await async_encrypt(str(origin_data))
+            post_data = {"aesjson": aes_data}
             
 
     # 如果超过最大重试次数仍然没有获取到座位,则退出程序
@@ -504,21 +490,28 @@ def check_time():
 def get_info_and_select_seat():
     global AUTH_TOKEN, NEW_DATE, MESSAGE
     try:
-        # logger.info(CLASSROOMS_NAME)
         NEW_DATE = get_date(DATE)
         get_auth_token()
+        
+        await get_server_time_offset()
+        
         for i in CLASSROOMS_NAME:
-            build_id = get_build_id(i)  # 获取教室 id
+            build_id = get_build_id(i)
+            if build_id != 22:
+                logger.info("当前只支持东校区图书馆-三层自习室")
+                continue
+            
             segment = get_segment(build_id, NEW_DATE)
-            select_seat(build_id, segment, NEW_DATE)
+            
+            await select_seat_concurrent(build_id, segment, NEW_DATE)
 
     except KeyboardInterrupt:
-        logger.info("主动退出程序，程序将退出。")
+        logger.info("主动退出程序")
 
 
 if __name__ == "__main__":
     try:
         read_config_from_yaml()
-        check_time()
+        asyncio.run(get_info_and_select_seat())
     except KeyboardInterrupt:
-        logger.info("主动退出程序，程序将退出。")
+        logger.info("主动退出程序")

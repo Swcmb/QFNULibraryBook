@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  time-checker:
+    build: .
+    container_name: time-checker
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

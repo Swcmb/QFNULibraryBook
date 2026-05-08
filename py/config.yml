@@ -44,3 +44,13 @@ CLASSROOMS_NAME:
 
 # 预约时间 ['today', 'tomorrow']
 DATE: "tomorrow"
+
+# 目标座位ID列表（系统内部ID），用于跳过get_seat_info直接提交
+TARGET_SEAT_IDS:
+  - "8312"
+  - "8300"
+  - "8288"
+  - "8276"
+
+# 优先抢的座位ID
+PRIORITY_SEAT_ID: "8312"
