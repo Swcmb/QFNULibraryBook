@@ -2,7 +2,8 @@ import asyncio
 import datetime
 import logging
 import os
-from aiohttp import web
+import aiohttp
+from aiohttp import web, ClientTimeout
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -93,6 +94,5 @@ async def init_app():
 
 
 if __name__ == '__main__':
-    import aiohttp
     app = init_app()
     web.run_app(app, host='0.0.0.0', port=8000)
