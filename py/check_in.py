@@ -273,8 +273,15 @@ def lib_rsv(bearer_token, user_name):
         headers=sub_headers,
         data=json.dumps(sub_data),
     )
-    res = json.loads(res.text)
-    print(res)
+    logger.info(f"API响应状态码: {res.status_code}")
+    logger.info(f"API响应内容: {res.text}")
+    try:
+        res = json.loads(res.text)
+        print(res)
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON解析失败: {e}")
+        logger.error(f"响应原始内容: {repr(res.text)}")
+        return
     if res["msg"] == "签到成功":
         # requests.get(url="" + user_name + "签到成功")
         logger.info("签到成功")
