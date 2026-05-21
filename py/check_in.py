@@ -280,10 +280,12 @@ def lib_rsv(bearer_token, user_name):
     msg = res.get("msg") or res.get("message", "")
     
     if msg == "签到成功":
+        # requests.get(url="" + user_name + "签到成功")
         logger.info("签到成功")
         MESSAGE = user_name + "签到成功！"
         send_message()
     elif msg == "使用中,不用重复签到！":
+        # requests.get(url="" + user_name + "已签到")
         logger.info("已签到")
         MESSAGE = user_name + "已签到！"
         send_message()
@@ -292,6 +294,7 @@ def lib_rsv(bearer_token, user_name):
         MESSAGE = user_name + "对不起，您的预约未生效！"
         send_message()
     else:
+        # requests.get(url="" + user_name + "签到失败")
         logger.error(f"签到失败，响应: {res}")
         MESSAGE = user_name + "签到失败！"
         send_message()
