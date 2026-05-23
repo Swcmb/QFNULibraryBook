@@ -268,31 +268,41 @@ def lib_rsv(bearer_token, user_name):
         "authorization": bearer_token,
     }
     sub_data = {"aesjson": aes_encrypt(), "authorization": bearer_token}
-    res = session.post(
-        url="http://libyy.qfnu.edu.cn/api/Seat/touch_qr_books",
-        headers=sub_headers,
-        data=json.dumps(sub_data),
-    )
-    res = json.loads(res.text)
-    print(res)
-    if res["msg"] == "签到成功":
-        # requests.get(url="" + user_name + "签到成功")
-        logger.info("签到成功")
-        MESSAGE = user_name + "签到成功！"
+    try:
+        res = session.post(
+            url="http://libyy.qfnu.edu.cn/api/Seat/touch_qr_books",
+            headers=sub_headers,
+            data=json.dumps(sub_data),
+        )
+        res = json.loads(res.text)
+        print(res)
+        
+        # 尝试同时处理 "msg" 和 "message" 字段
+        msg = res.get("msg") or res.get("message")
+        
+        if msg == "签到成功":
+            logger.info("签到成功")
+            MESSAGE = user_name + "签到成功！"
+            send_message()
+        elif msg == "使用中,不用重复签到！":
+            logger.info("已签到")
+            MESSAGE = user_name + "已签到！"
+            send_message()
+        elif msg == "对不起，您的预约未生效":
+            logger.warning("预约未生效")
+            MESSAGE = user_name + "对不起，您的预约未生效！"
+            send_message()
+        else:
+            logger.error(f"签到失败: {msg}")
+            MESSAGE = user_name + f"签到失败！原因: {msg}"
+            send_message()
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON解析失败: {e}, 响应内容: {res.text if 'res' in locals() else '未知'}")
+        MESSAGE = user_name + "签到失败！服务器响应异常"
         send_message()
-    elif res["msg"] == "使用中,不用重复签到！":
-        # requests.get(url="" + user_name + "已签到")
-        logger.info("已签到")
-        MESSAGE = user_name + "已签到！"
-        send_message()
-    elif res["msg"] == "对不起，您的预约未生效":
-        logger.warning("预约未生效")
-        MESSAGE = user_name + "对不起，您的预约未生效！"
-        send_message()
-    else:
-        # requests.get(url="" + user_name + "签到失败")
-        logger.error("签到失败")
-        MESSAGE = user_name + "签到失败！"
+    except Exception as e:
+        logger.error(f"签到请求异常: {e}")
+        MESSAGE = user_name + f"签到失败！错误: {e}"
         send_message()
 
 
