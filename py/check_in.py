@@ -275,17 +275,19 @@ def lib_rsv(bearer_token, user_name):
     )
     res = json.loads(res.text)
     print(res)
-    if res["msg"] == "签到成功":
+    # 同时支持 'msg' 和 'message' 两种键名
+    response_msg = res.get("msg") or res.get("message", "")
+    if response_msg == "签到成功":
         # requests.get(url="" + user_name + "签到成功")
         logger.info("签到成功")
         MESSAGE = user_name + "签到成功！"
         send_message()
-    elif res["msg"] == "使用中,不用重复签到！":
+    elif response_msg == "使用中,不用重复签到！":
         # requests.get(url="" + user_name + "已签到")
         logger.info("已签到")
         MESSAGE = user_name + "已签到！"
         send_message()
-    elif res["msg"] == "对不起，您的预约未生效":
+    elif response_msg == "对不起，您的预约未生效":
         logger.warning("预约未生效")
         MESSAGE = user_name + "对不起，您的预约未生效！"
         send_message()
