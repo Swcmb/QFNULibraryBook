@@ -4,6 +4,9 @@
 
 [![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-blue.svg)](LICENSE)
 
+<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/7992379a-e184-4cb9-ad63-303e28cf8698" />
+
+
 ## 项目简介
 
 自动化完成曲阜师范大学图书馆自习室座位的**预约 → 签到 → 签退**三阶段流程，支持多用户、多教室、多渠道通知推送。目标系统为 `http://libyy.qfnu.edu.cn`。
