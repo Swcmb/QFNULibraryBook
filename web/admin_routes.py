@@ -723,3 +723,20 @@ def admin_list_plans():
     except Exception as e:
         admin_logger.error(f'获取套餐列表失败: {e}')
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/subscriptions/activations', methods=['GET'])
+def admin_activation_logs():
+    """查看最近激活记录"""
+    auth_err = _require_admin()
+    if auth_err:
+        return auth_err
+
+    try:
+        from src.notify.admin_notify import get_recent_activations
+        limit = request.args.get('limit', 50, type=int)
+        records = get_recent_activations(limit)
+        return jsonify({'success': True, 'records': records, 'total': len(records)})
+    except Exception as e:
+        admin_logger.error(f'获取激活记录失败: {e}')
+        return jsonify({'success': False, 'error': str(e)}), 500

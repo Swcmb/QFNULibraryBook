@@ -110,7 +110,7 @@ class UserManager:
 
     def _next_student_filename(self) -> Optional[str]:
         for i in range(1, 27):
-            candidate = f'student{chr(ord(A) + i - 1)}.yml'
+            candidate = f'student{chr(ord("A") + i - 1)}.yml'
             if not os.path.exists(os.path.join(CONFIGS_DIR, candidate)):
                 return candidate
         return None
@@ -154,7 +154,7 @@ class UserManager:
             cfg_data['SUBSCRIPTION_STATUS'] = 'active'
             _atomic_write_yaml(cfg_path, cfg_data)
 
-            logger.info(f'用户 {username} 订阅已更新：{plan_type}，到期时间：{cfg_data[SUBSCRIPTION_EXPIRES]}')
+            logger.info(f'用户 {username} 订阅已更新：{plan_type}，到期时间：{cfg_data["SUBSCRIPTION_EXPIRES"]}')
             return True
         finally:
             if fd:

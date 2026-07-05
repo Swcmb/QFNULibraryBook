@@ -113,7 +113,10 @@
     async function showMainView() {
         document.getElementById("loginView").classList.add("hidden");
         document.getElementById("mainView").classList.remove("hidden");
-        await Promise.all([loadUsers(), refreshGrabStatus(), loadLogs()]);
+        await Promise.all([
+            loadUsers(), refreshGrabStatus(), loadLogs(),
+            loadPlansForGenerate(), loadCodes(), loadActivationLogs(), loadSubStats(),
+        ]);
     }
 
     // ---------- 账号列表 ----------
@@ -471,6 +474,128 @@
             showToast(data.error || "删除失败", "error");
         }
     }
+
+    // ---------- 订阅管理 ----------
+
+    const SUB_API = {
+        plans: "/admin/api/subscriptions/plans",
+        codes: "/admin/api/subscriptions/codes",
+        stats: "/admin/api/subscriptions/stats",
+        activations: "/admin/api/subscriptions/activations",
+    };
+
+    let codesPage = 1;
+    const CODES_PAGE_SIZE = 20;
+
+    async function loadPlansForGenerate() {
+        const data = await fetchJSON(SUB_API.plans);
+        if (!data.success || !data.plans) return;
+        const sel = document.getElementById("genPlanId");
+        sel.innerHTML = '<option value="">请选择套餐</option>' +
+            data.plans.map((p) => `<option value="${p.id}">${p.name} (¥${p.price})</option>`).join("");
+    }
+
+    async function generateCodes() {
+        const planId = document.getElementById("genPlanId").value;
+        const count = parseInt(document.getElementById("genCount").value, 10) || 1;
+        const boundUser = document.getElementById("genBoundUser").value.trim();
+
+        if (!planId) { showToast("请选择套餐", "error"); return; }
+
+        const data = await fetchJSON(SUB_API.codes, {
+            method: "POST",
+            body: { plan_id: planId, count: count, bound_username: boundUser },
+        });
+
+        if (data.success) {
+            const resultDiv = document.getElementById("genResult");
+            resultDiv.innerHTML = `✅ 成功生成 ${data.codes.length} 个激活码<br>` +
+                data.codes.map((c) =>
+                    `<code style="background:#f0f0f0; padding:2px 6px; border-radius:3px; font-size:13px;">${c.code}</code>`
+                ).join(" ");
+            showToast(`已生成 ${data.codes.length} 个激活码`, "success");
+            loadCodes();
+        } else {
+            showToast(data.error || "生成失败", "error");
+        }
+    }
+
+    async function loadCodes() {
+        const status = document.getElementById("codeStatusFilter").value;
+        const data = await fetchJSON(`${SUB_API.codes}?status=${status}&page=${codesPage}&page_size=${CODES_PAGE_SIZE}`);
+        if (!data.success) return;
+
+        const tbody = document.getElementById("codesTable");
+        if (!data.codes || data.codes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#909399;">暂无激活码</td></tr>';
+            document.getElementById("codesPagination").textContent = "";
+            return;
+        }
+
+        const statusMap = { pending: "待使用", active: "已使用", revoked: "已作废" };
+        const statusClass = { pending: "status-idle", active: "status-success", revoked: "status-failed" };
+
+        tbody.innerHTML = data.codes.map((c) => `
+            <tr>
+                <td style="font-family:monospace; font-size:13px;">${escapeHTML(c.code)}</td>
+                <td>${escapeHTML(c.plan_id)}</td>
+                <td><span class="status-badge ${statusClass[c.status] || "status-idle"}">${statusMap[c.status] || c.status}</span></td>
+                <td>${escapeHTML(c.used_by || "—")}</td>
+                <td style="font-size:12px;">${escapeHTML(c.created_at ? c.created_at.slice(0, 16) : "")}</td>
+                <td>${c.status === "pending" ? `<button class="btn-danger btn-sm" onclick="revokeCode('${c.code}')">作废</button>` : ""}</td>
+            </tr>
+        `).join("");
+
+        const total = data.total || 0;
+        const totalPages = Math.ceil(total / CODES_PAGE_SIZE);
+        document.getElementById("codesPagination").textContent =
+            total > 0 ? `共 ${total} 条，第 ${codesPage}/${totalPages} 页` : "";
+    }
+
+    async function revokeCode(code) {
+        if (!confirm(`确认作废激活码 ${code}？`)) return;
+        const data = await fetchJSON(`${SUB_API.codes}/${code}/revoke`, { method: "POST" });
+        if (data.success) {
+            showToast("激活码已作废", "success");
+            loadCodes();
+        } else {
+            showToast(data.error || "作废失败", "error");
+        }
+    }
+
+    async function loadActivationLogs() {
+        const data = await fetchJSON(SUB_API.activations + "?limit=50");
+        const tbody = document.getElementById("activationsTable");
+        if (!data.success || !data.records || data.records.length === 0) {
+            tbody.innerHTML = '<tr><td style="text-align:center; color:#909399;">暂无激活记录</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.records.map((r) => `
+            <tr><td style="font-size:12px; font-family:monospace;">${escapeHTML(r)}</td></tr>
+        `).join("");
+    }
+
+    async function loadSubStats() {
+        const data = await fetchJSON(SUB_API.stats);
+        const container = document.getElementById("subStats");
+        if (!data.success || !data.stats) {
+            container.innerHTML = '<span style="color:#909399;">加载失败</span>';
+            return;
+        }
+        const s = data.stats;
+        container.innerHTML = `
+            <span>📊 订阅用户: <strong>${s.active_subscribers}</strong> 人</span>
+            <span>💰 总收入: <strong>¥${s.total_revenue}</strong></span>
+            <span>📦 套餐分布: <strong>${Object.entries(s.plan_stats || {}).map(([k, v]) => `${k}: ${v}`).join(" | ") || "无"}</strong></span>
+        `;
+    }
+
+    // 暴露到全局
+    window.generateCodes = generateCodes;
+    window.loadCodes = loadCodes;
+    window.revokeCode = revokeCode;
+    window.loadActivationLogs = loadActivationLogs;
+    window.loadSubStats = loadSubStats;
 
     // ---------- 初始化 ----------
 

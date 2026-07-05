@@ -110,7 +110,7 @@ def api_activate():
         code_mgr.activate_code(activation_code, username)
 
         sub_info = user_mgr.get_subscription_info(username)
-        notify_activation(username, plan['name'], sub_info['expires_at'])
+        notify_activation(username, plan['name'], sub_info['expires_at'], activation_code)
 
         return jsonify({
             'success': True,
@@ -125,7 +125,7 @@ def api_activate():
         logger.error(f'用户 {username} 激活过程异常: {e}')
         user_mgr.restore_subscription_snapshot(username, snapshot)
         cron_mgr.remove_user_tasks(username)
-        notify_rollback_failure(username, '激活过程异常', str(e))
+        notify_rollback_failure(username, '激活过程异常', str(e), activation_code)
         return jsonify({'success': False, 'error': '激活过程异常', 'error_code': 'INTERNAL_ERROR'}), 500
 
 @plans_bp.route('/api/status')

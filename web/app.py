@@ -8,6 +8,8 @@ import json
 import logging
 import os
 import sys
+import threading
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
@@ -33,6 +35,70 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
+
+# ---------- 到期自动检查后台线程 ----------
+
+_EXPIRY_CHECK_INTERVAL = 3600  # 每小时检查一次
+_EXPIRY_CHECK_LOCK = threading.Lock()
+_EXPIRY_CHECK_RUNNING = False
+_expiry_thread = None
+
+
+def _check_expired():
+    """在后台线程中定期检查过期订阅"""
+    global _EXPIRY_CHECK_RUNNING
+    from src.user.user_manager import UserManager
+    from src.subscription.cron_manager import CronManager
+    from src.notify.admin_notify import notify_expired, notify_expiring_soon
+
+    user_mgr = UserManager()
+    cron_mgr = CronManager()
+
+    while _EXPIRY_CHECK_RUNNING:
+        try:
+            time.sleep(_EXPIRY_CHECK_INTERVAL)
+            subscribed = user_mgr.list_subscribed_users()
+            for u in subscribed:
+                if u.get("status") != "active":
+                    continue
+                expires_str = u.get("expires_at", "")
+                if not expires_str:
+                    continue
+                try:
+                    from datetime import datetime
+                    expires = datetime.strptime(expires_str, "%Y-%m-%d")
+                    now = datetime.now()
+                    if expires < now:
+                        user_mgr.update_subscription(u["username"], u.get("plan_type", ""), 0)
+                        cron_mgr.remove_user_tasks(u["username"])
+                        notify_expired(u["username"])
+                        logger.info(f"[到期检查] 用户 {u['username']} 订阅已到期，定时任务已停止")
+                    elif (expires - now).days <= 3:
+                        notify_expiring_soon(u["username"], (expires - now).days)
+                        logger.info(f"[到期检查] 用户 {u['username']} 订阅即将到期，剩余 {(expires - now).days} 天")
+                except ValueError:
+                    continue
+        except Exception as e:
+            logger.error(f"[到期检查] 后台线程异常: {e}")
+
+
+def _start_expiry_checker():
+    """启动到期检查后台线程（幂等）"""
+    global _expiry_thread, _EXPIRY_CHECK_RUNNING
+    with _EXPIRY_CHECK_LOCK:
+        if _EXPIRY_CHECK_RUNNING:
+            return
+        _EXPIRY_CHECK_RUNNING = True
+        _expiry_thread = threading.Thread(target=_check_expired, daemon=True)
+        _expiry_thread.start()
+        logger.info("[到期检查] 后台线程已启动")
+
+
+def _stop_expiry_checker():
+    global _EXPIRY_CHECK_RUNNING
+    with _EXPIRY_CHECK_LOCK:
+        _EXPIRY_CHECK_RUNNING = False
+    logger.info("[到期检查] 后台线程已停止")
 
 
 def _csrf_guard():
@@ -149,7 +215,14 @@ def api_signout():
 def api_status():
     u = session.get("username")
     if u:
-        return jsonify({"logged_in": True, "username": u})
+        sub_info = None
+        try:
+            from src.user.user_manager import UserManager
+            user_mgr = UserManager()
+            sub_info = user_mgr.get_subscription_info(u)
+        except Exception:
+            pass
+        return jsonify({"logged_in": True, "username": u, "subscription": sub_info})
     return jsonify({"logged_in": False})
 
 
@@ -171,4 +244,5 @@ app.register_blueprint(plans_bp)
 
 
 if __name__ == "__main__":
+    _start_expiry_checker()
     app.run(host="0.0.0.0", port=5000, debug=True)

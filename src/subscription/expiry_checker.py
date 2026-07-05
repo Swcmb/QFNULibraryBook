@@ -29,7 +29,7 @@ def check_expiring_subscriptions(days_before: int = 3):
 
             if 0 < days_left <= days_before:
                 notify_expiring_soon(user['username'], days_left)
-                print(f'用户 {user[username]} 订阅即将到期，剩余 {days_left} 天')
+                print(f'用户 {user["username"]} 订阅即将到期，剩余 {days_left} 天')
 
         except ValueError:
             continue
@@ -56,7 +56,7 @@ def check_expired_subscriptions():
                 user_mgr.update_subscription(user['username'], user['plan_type'], 0)
                 cron_mgr.remove_user_tasks(user['username'])
                 notify_expired(user['username'])
-                print(f'用户 {user[username]} 订阅已到期，定时任务已停止')
+                print(f'用户 {user["username"]} 订阅已到期，定时任务已停止')
 
         except ValueError:
             continue
