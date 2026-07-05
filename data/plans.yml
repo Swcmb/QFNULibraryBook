@@ -1,0 +1,28 @@
+plans:
+- id: checkin_monthly
+  name: 自动签到月卡
+  description: 每日自动签到，省心省力，再也不用担心迟到
+  price: 9.9
+  type: checkin
+  duration_days: 30
+  default_checkin_time: 08:01
+  default_signout_time: ''
+  enabled: true
+- id: signout_monthly
+  name: 自动签退月卡
+  description: 每日自动签退，不用担心超时被记录
+  price: 9.9
+  type: signout
+  duration_days: 30
+  default_checkin_time: ''
+  default_signout_time: '21:01'
+  enabled: true
+- id: combo_monthly
+  name: 签到签退组合包
+  description: 自动签到 + 自动签退，全程无忧，性价比之选
+  price: 16.9
+  type: combo
+  duration_days: 30
+  default_checkin_time: 08:01
+  default_signout_time: '21:01'
+  enabled: true

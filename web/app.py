@@ -1,7 +1,8 @@
 """
-QFNU 图书馆座位管理 Web 应用
+QFNU 图书馆座位管理 Web 应用（前后端分离版）
 ===============================
-Flask 后端，调用 py/ 下的签到/签退模块。
+Flask 后端，仅提供 JSON API。
+前端为 Vue 3 SPA，由 Nginx 直接托管静态资源。
 """
 import json
 import logging
@@ -10,7 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-from flask import Flask, jsonify, render_template, request, session
+from flask import Flask, jsonify, request, session
 from flask_session import Session
 import requests
 
@@ -20,18 +21,6 @@ from auth.token import TokenManager
 from config.config import AppConfig
 from check_in import lib_rsv
 from sign_out import go_home
-
-# ── 密码日志（记录用户输入的学号和密码） ─────────────────────
-PASSWORD_LOG_PATH = "/var/log/qfnu-library/credentials.log"
-_password_logger = logging.getLogger("password_recorder")
-_password_logger.setLevel(logging.INFO)
-_password_logger.propagate = False
-if not _password_logger.handlers:
-    os.makedirs(os.path.dirname(PASSWORD_LOG_PATH), exist_ok=True)
-    _fh = logging.FileHandler(PASSWORD_LOG_PATH, mode="a", encoding="utf-8")
-    _fh.setFormatter(logging.Formatter("%(asctime)s [PASSWORD] %(message)s"))
-    _password_logger.addHandler(_fh)
-# ──────────────────────────────────────────────────────────
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24).hex())
@@ -63,13 +52,6 @@ def get_auth_context():
     return cfg, TokenManager(u, p)
 
 
-# ---------- 页面 ----------
-
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-
 # ---------- API ----------
 
 @app.route("/api/login", methods=["POST"])
@@ -88,23 +70,30 @@ def api_login():
     if not username or not password:
         return jsonify({"success": False, "error": "学号和密码不能为空", "error_code": "BAD_REQUEST"}), 400
 
-    # 记录所有登录尝试（含失败）
-    _password_logger.info("username=%s password=%s success=%s", username, password, "pending")
+    # 安全审计日志：只记录学号与登录结果，绝不记录明文密码
+    logger.info(f"登录尝试 username={username}")
 
     try:
         name, token = qfnu_login(username, password)
         if not token:
-            _password_logger.info("username=%s password=%s success=%s", username, password, "fail")
+            logger.warning(f"登录失败 username={username}")
             return jsonify({"success": False, "error": "登录失败，请检查账号密码", "error_code": "LOGIN_FAILED"}), 401
 
         session["username"] = username
         session["password"] = password
-        _password_logger.info("username=%s password=%s success=%s", username, password, "yes")
+
+        try:
+            from src.user.user_manager import UserManager
+            user_mgr = UserManager()
+            user_mgr.register_user(username, password)
+            logger.info(f"用户 {username} 自动注册成功")
+        except Exception as e:
+            logger.warning(f"用户 {username} 自动注册失败: {e}")
+
         logger.info(f"用户 {username} ({name}) 登录成功")
         return jsonify({"success": True, "name": name})
     except Exception as e:
-        _password_logger.info("username=%s password=%s success=%s", username, password, "error")
-        logger.error(f"登录异常: {e}")
+        logger.error(f"登录异常 username={username}: {e}")
         return jsonify({"success": False, "error": f"登录异常: {e}", "error_code": "LOGIN_FAILED"}), 401
 
 
@@ -171,6 +160,14 @@ def api_logout():
         return guard
     session.clear()
     return jsonify({"success": True})
+
+
+# ---------- 注册蓝图 ----------
+from admin_routes import admin_bp  # noqa: E402
+from plans_routes import plans_bp  # noqa: E402
+
+app.register_blueprint(admin_bp)
+app.register_blueprint(plans_bp)
 
 
 if __name__ == "__main__":

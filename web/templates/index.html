@@ -161,6 +161,17 @@
     color: #6b7280; font-size: 14px; cursor: pointer; transition: all 0.2s;
   }
   .logout-btn:hover { border-color: #dc2626; color: #dc2626; }
+  .subscribe-btn {
+    display: block; width: 100%; padding: 12px;
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    border: none; border-radius: 10px;
+    color: #fff; font-size: 15px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s; margin-bottom: 14px;
+  }
+  .subscribe-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 25px rgba(139,92,246,0.4);
+  }
 
   .footer {
     text-align: center; margin-top: 24px; padding-top: 16px;
@@ -225,6 +236,7 @@
         <span class="spinner"></span>
       </button>
     </div>
+    <button class="subscribe-btn" onclick="window.location.href="/plans"">💎 订阅服务</button>
     <button class="logout-btn" onclick="handleLogout()">退出登录</button>
   </div>
 

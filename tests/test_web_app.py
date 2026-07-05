@@ -7,25 +7,32 @@ QFNU 图书馆座位管理 Web 应用 — 全面测试用例
 """
 import json
 import os
+import sys
 import tempfile
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+# ─── 清理 sys.path 中干扰导入的路径 ──────────────────────────
+for _p in list(sys.path):
+    if "DocReview" in _p or "Agent" in _p:
+        sys.path.remove(_p)
+
 # ─── 确保 Flask-Session 文件系统存储目录存在 ────────────────────
-# Flask-Session 默认在 CWD 下创建 flask_session/ 目录
 _session_dir = os.path.join(os.getcwd(), "flask_session")
 os.makedirs(_session_dir, exist_ok=True)
 
+# ─── Mock 平台相关模块和 cv2（导入时可能触发兼容性问题） ──────────
+CV2_MOCK = MagicMock()
+CV2_MOCK.dnn = MagicMock()
+# cv2.typing 在 cv2 包内，需要在导入 cv2 后再 mock
+sys.modules["fcntl"] = MagicMock()
+sys.modules["cv2"] = CV2_MOCK
+sys.modules["cv2.dnn"] = MagicMock()
+sys.modules["cv2.typing"] = MagicMock()
+sys.modules["cv2.data"] = MagicMock()
 
-# ─── 在导入 app 前 mock 掉密码日志的文件系统操作 ──────────────
-# 阻止测试环境访问 /var/log/qfnu-library/
-_tmp_dir = tempfile.mkdtemp()
-with patch("web.app.PASSWORD_LOG_PATH", os.path.join(_tmp_dir, "credentials.log")):
-    with patch("os.makedirs") as mock_makedirs:
-        with patch("logging.FileHandler") as mock_fh:
-            mock_fh.return_value = MagicMock()
-            from web import app as web_app
+from web import app as web_app
 
 
 # Flask test client
@@ -344,17 +351,16 @@ class TestLogoutAPI:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 7. 主页面
+# 7. 主页面（前后端分离版无 Flask 路由，由 nginx 直接托管 SPA）
 # ═══════════════════════════════════════════════════════════════════
 
 class TestIndexPage:
-    """GET / — 首页"""
+    """GET / — 前后端分离版中 Flask 不提供首页路由"""
 
-    def test_index_returns_html(self, client):
-        """首页应返回 HTML 页面"""
+    def test_index_returns_404_from_flask(self, client):
+        """Flask 不提供 / 路由，应返回 404（由 nginx 托管 SPA）"""
         resp = client.get("/")
-        assert resp.status_code == 200
-        assert resp.content_type.startswith("text/html")
+        assert resp.status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════════

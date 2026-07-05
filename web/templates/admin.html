@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QFNU 图书馆抢座 · 管理面板</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        h1 { color: #2c3e50; margin-bottom: 20px; }
+        h2 { color: #34495e; margin: 20px 0 10px; padding-bottom: 8px; border-bottom: 2px solid #ecf0f1; }
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .form-group { margin-bottom: 12px; }
+        label { display: block; font-weight: 600; margin-bottom: 4px; color: #555; }
+        input, select, textarea {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #409eff;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-family: inherit;
+            transition: background 0.2s;
+        }
+        .btn-primary { background: #409eff; color: #fff; }
+        .btn-primary:hover { background: #66b1ff; }
+        .btn-danger { background: #f56c6c; color: #fff; }
+        .btn-danger:hover { background: #f78989; }
+        .btn-success { background: #67c23a; color: #fff; }
+        .btn-success:hover { background: #85ce61; }
+        .btn-warning { background: #e6a23c; color: #fff; }
+        .btn-warning:hover { background: #ebb563; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ebeef5; font-size: 14px; }
+        th { background: #fafafa; font-weight: 600; color: #606266; }
+        tr:hover { background: #f5f7fa; }
+        /* 输入框内嵌小眼睛（模态框密码字段） */
+        .input-with-toggle {
+            position: relative;
+        }
+        .input-with-toggle input {
+            width: 100%;
+            padding-right: 44px;
+        }
+        .input-toggle {
+            position: absolute;
+            right: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 34px;
+            height: 34px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: #fff;
+            color: #606266;
+            cursor: pointer;
+            border-radius: 4px;
+            padding: 0;
+            z-index: 99;
+            border: 1px solid #dcdfe6;
+            transition: all 0.2s;
+        }
+        .input-toggle:hover {
+            color: #409eff;
+            border-color: #409eff;
+            background: #ecf5ff;
+        }
+        .input-toggle:active {
+            transform: translateY(-50%) scale(0.95);
+        }
+        .input-toggle:focus { outline: none; }
+        .input-toggle svg { width: 18px; height: 18px; }
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: flex-start;
+            padding-top: 60px;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: #fff;
+            border-radius: 8px;
+            padding: 24px;
+            width: 90%;
+            max-width: 540px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal h3 { margin-bottom: 16px; color: #2c3e50; }
+        .modal-actions { text-align: right; margin-top: 16px; }
+        .modal-actions button { margin-left: 8px; }
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 4px;
+            color: #fff;
+            z-index: 2000;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .toast.show { opacity: 1; }
+        .toast.success { background: #67c23a; }
+        .toast.error { background: #f56c6c; }
+        .login-box { max-width: 360px; margin: 80px auto; }
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            color: #fff;
+        }
+        .status-running { background: #e6a23c; }
+        .status-idle { background: #909399; }
+        .status-success { background: #67c23a; }
+        .status-failed { background: #f56c6c; }
+        .order-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #f5f7fa;
+            margin-bottom: 6px;
+            border-radius: 4px;
+        }
+        .order-item .index { font-weight: 600; color: #409eff; margin-right: 12px; }
+        .order-item .username { flex: 1; }
+        .order-actions button { margin-left: 4px; }
+        .log-box {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 12px;
+            border-radius: 4px;
+            font-family: "Consolas", "Monaco", monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .seat-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+        .seat-row input { flex: 1; }
+        .hidden { display: none; }
+        .hint { color: #909399; font-size: 12px; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>QFNU 图书馆抢座 · 管理面板</h1>
+
+        <!-- 登录视图 -->
+        <div id="loginView" class="card login-box">
+            <h2 style="border:none; margin-top:0;">管理员登录</h2>
+            <div class="form-group">
+                <label>访问密码</label>
+                <div class="input-with-toggle">
+                    <input type="password" id="loginPassword" placeholder="请输入管理面板访问密码" autofocus>
+                    <button type="button" class="input-toggle" data-target="loginPassword" onclick="togglePasswordVisibility(this)" title="显示/隐藏密码">
+                        <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    </button>
+                </div>
+            </div>
+            <button class="btn-primary" onclick="login()" style="width:100%;">登录</button>
+        </div>
+
+        <!-- 主面板视图 -->
+        <div id="mainView" class="hidden">
+            <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <strong>欢迎回来，管理员</strong>
+                    <span style="color:#909399; margin-left:12px; font-size:12px;">已登录</span>
+                </div>
+                <button class="btn-warning btn-sm" onclick="logout()">退出登录</button>
+            </div>
+
+            <!-- 抢座操作 -->
+            <div class="card">
+                <h2 style="margin-top:0;">抢座任务</h2>
+                <div style="display:flex; align-items:center; gap:16px; margin-bottom:12px;">
+                    <button class="btn-success" onclick="triggerGrab()">立即抢座</button>
+                    <span>状态：<span id="grabStatus" class="status-badge status-idle">空闲</span></span>
+                    <button class="btn-primary btn-sm" onclick="refreshGrabStatus()">刷新</button>
+                </div>
+                <div id="grabResults"></div>
+            </div>
+
+            <!-- 抢座顺序 -->
+            <div class="card">
+                <h2 style="margin-top:0;">抢座执行顺序</h2>
+                <p class="hint">从上到下依次执行，单账号失败不影响后续账号。可上下调整顺序。</p>
+                <div id="orderList"></div>
+                <button class="btn-primary btn-sm" onclick="saveOrder()" style="margin-top:8px;">保存顺序</button>
+            </div>
+
+            <!-- 账号管理 -->
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <h2 style="margin:0; border:none; padding:0;">账号管理</h2>
+                    <button class="btn-primary btn-sm" onclick="openAddUserModal()">+ 新增账号</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>学号</th>
+                            <th>密码</th>
+                            <th>模式</th>
+                            <th>座位</th>
+                            <th>教室</th>
+                            <th>日期</th>
+                            <th>通知</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTable"></tbody>
+                </table>
+            </div>
+
+            <!-- 日志查看 -->
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <h2 style="margin:0; border:none; padding:0;">操作日志</h2>
+                    <div>
+                        <input type="number" id="logLines" value="100" style="width:80px; display:inline-block;">
+                        <button class="btn-primary btn-sm" onclick="loadLogs()">刷新</button>
+                    </div>
+                </div>
+                <div id="logBox" class="log-box">暂无日志</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 账号编辑模态框 -->
+    <div id="userModal" class="modal-overlay">
+        <div class="modal">
+            <h3 id="modalTitle">编辑账号</h3>
+            <input type="hidden" id="modalOriginalUsername">
+            <div class="form-group">
+                <label>学号</label>
+                <input type="text" id="modalUsername">
+            </div>
+            <div class="form-group">
+                <label>密码</label>
+                <div class="input-with-toggle">
+                    <input type="password" id="modalPassword">
+                    <button type="button" class="input-toggle" data-target="modalPassword" onclick="togglePasswordVisibility(this)" title="显示/隐藏密码">
+                        <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>抢座模式</label>
+                <select id="modalMode" onchange="onModeChange()">
+                    <option value="1">1 - 指定范围内随机（靠近插座）</option>
+                    <option value="2">2 - 靠近插座</option>
+                    <option value="3">3 - 随机</option>
+                    <option value="4">4 - 指定座位号优先级</option>
+                </select>
+            </div>
+            <div class="form-group" id="seatIdGroup">
+                <label>座位配置</label>
+                <div id="seatIdContainer"></div>
+                <p class="hint" id="seatHint"></p>
+                <button class="btn-primary btn-sm" type="button" onclick="addSeatRow()">+ 添加</button>
+            </div>
+            <div class="form-group">
+                <label>教室名称（每行一个）</label>
+                <textarea id="modalClassrooms" rows="3" placeholder="东校区图书馆-三层自习室"></textarea>
+            </div>
+            <div class="form-group">
+                <label>预约日期</label>
+                <select id="modalDate">
+                    <option value="today">今天</option>
+                    <option value="tomorrow">明天</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>通知渠道</label>
+                <select id="modalPushMethod">
+                    <option value="">不通知</option>
+                    <option value="DD">钉钉</option>
+                    <option value="TG">Telegram</option>
+                    <option value="BARK">Bark</option>
+                    <option value="ANPUSH">Anpush</option>
+                </select>
+            </div>
+            <div class="form-group" id="ddTokenGroup">
+                <label>钉钉 Token</label>
+                <input type="text" id="modalDdToken">
+            </div>
+            <div class="form-group" id="ddSecretGroup">
+                <label>钉钉 Secret</label>
+                <input type="text" id="modalDdSecret">
+            </div>
+            <div class="modal-actions">
+                <button class="btn-warning" onclick="closeModal()">取消</button>
+                <button class="btn-primary" onclick="saveUser()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="/static/admin.js?v=20260705"></script>
+    <script>
+        // 兜底：如果 admin.js 加载失败或被缓存，确保小眼睛功能可用
+        window.togglePasswordVisibility = window.togglePasswordVisibility || function(btn) {
+            var targetId = btn.getAttribute("data-target");
+            if (!targetId) {
+                console.error("togglePasswordVisibility: 缺少 data-target");
+                return;
+            }
+            var input = document.getElementById(targetId);
+            if (!input) {
+                console.error("togglePasswordVisibility: 找不到 input #" + targetId);
+                return;
+            }
+            var isHidden = input.type === "password";
+            input.type = isHidden ? "text" : "password";
+            var eyeIcon = btn.querySelector(".icon-eye");
+            var eyeOffIcon = btn.querySelector(".icon-eye-off");
+            if (eyeIcon) eyeIcon.style.display = isHidden ? "none" : "";
+            if (eyeOffIcon) eyeOffIcon.style.display = isHidden ? "" : "none";
+            console.log("密码可见性切换:", targetId, "→", input.type);
+        };
+    </script>
+</body>
+</html>
