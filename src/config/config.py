@@ -32,6 +32,8 @@ class AppConfig:
     date: str = ""
     # 其他（当前未使用，保留以保持配置文件向后兼容）
     github: str = ""
+    # 抢座暂停开关
+    suspend: bool = False
 
     @classmethod
     def from_yaml(cls, config_file: Optional[str] = None) -> "AppConfig":
@@ -76,4 +78,5 @@ class AppConfig:
             seat_id=raw.get("SEAT_ID", []),
             date=raw.get("DATE", ""),
             github=raw.get("GITHUB", ""),
+            suspend=raw.get("SUSPEND", False),
         )

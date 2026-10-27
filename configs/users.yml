@@ -3,8 +3,8 @@
 # name 字段可选，仅用于日志标识；未设置时使用配置中的 USERNAME
 
 users:
-  - config: studentA.yml
-    name: "学生 A"
+  - config: user1.yml
+    name: "<姓名B> (<学号B>)"
 
-  - config: studentB.yml
-    name: "学生 B"
+  - config: user2.yml
+    name: "<姓名A> (<学号A>)"

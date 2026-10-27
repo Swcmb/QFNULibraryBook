@@ -8,8 +8,8 @@ build/
 
 # Node.js
 node_modules/
-.pnp
-.pnp.js
+package-lock.json
+package.json
 
 # IDE
 .idea/
@@ -31,29 +31,21 @@ debug_*.png
 debug_*.jpg
 src/debug_captcha/
 web/flask_session/
+web/static/logo.png
 
-# ---- 隐私：服务器上的用户配置（含真实账号密码） ----
-# 本地 studentA.yml/studentB.yml/users.yml 是占位符模板，保留
-configs/admin.yml
-configs/user*.yml
+# 临时备份文件（人工排查时产生，不入库）
+*.bak
+*.bak_*
+*.bak.*
+*.orig
+*.rej
 
-# 隐私：环境变量
-.env
+# archive/legacy/ 中的历史版本需要入库（覆盖上方的 *.bak 通配）
+!archive/legacy/**
+!archive/legacy/*.bak*
 
-# 隐私：激活码数据
-data/activation_codes.yml
-
-# 隐私：性能探测结果（含内部延迟信息）
-scripts/performance_results.json
-
-# 前端构建产物
-frontend/dist/
-frontend/*.local
-
-# 日志
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
+# ── 2026-10-27 脱敏规则解除 ──────────────────────────────────────────────
+# 姓名与学号已替换为 <姓名A>/<学号A> 等占位符，密码与通知 token 已替换为
+# <redacted>，configs/、automation/scripts/、automation/cron/ 与技能文档
+# 因此恢复入库。真实值只保留在服务器与本机非仓库目录。
+# 运行日志、记忆体、archive/ 仍不入库（见上文与同步范围约定）。

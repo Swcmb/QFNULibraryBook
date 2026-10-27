@@ -1,11 +1,15 @@
 """
 测试 py/get_seat.py — 座位预约主逻辑
 """
+import threading
+import time
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 from get_seat import (
+    ConfirmPacer,
+    _first_window_burst,
     random_get_seat,
     check_reservation_status,
     check_book_seat,
@@ -88,18 +92,18 @@ class TestCheckReservationStatus:
         assert result is True
 
     def test_unknown_msg(self, sample_config, fake_token_mgr):
-        """未知消息返回 True"""
+        """未知消息不视为成功，继续重试"""
         result = check_reservation_status(
             {"msg": "未知状态"}, sample_config, fake_token_mgr, []
         )
-        assert result is True
+        assert result is False
 
-    def test_invalid_input_exits(self, sample_config, fake_token_mgr):
-        """非 dict 输入触发 ReservationFailed"""
-        with pytest.raises(ReservationFailed):
-            check_reservation_status(
-                "not a dict", sample_config, fake_token_mgr, []
-            )
+    def test_invalid_input_retries(self, sample_config, fake_token_mgr):
+        """非 dict 输入（服务端削峰）不退出，交给额度闸门重试"""
+        result = check_reservation_status(
+            "not a dict", sample_config, fake_token_mgr, []
+        )
+        assert result is False
 
 
 # ========== check_book_seat ==========
@@ -149,6 +153,12 @@ class TestCheckBookSeat:
 
 class TestSelectSeat:
     """选座主逻辑"""
+
+    @pytest.fixture(autouse=True)
+    def _no_release_wait(self, monkeypatch):
+        """这些用例覆盖的是放座后的循环，不要真的睡到当天 19:20。"""
+        monkeypatch.setattr("get_seat.release_epoch", lambda _cfg: None)
+        monkeypatch.setattr("get_seat.STEADY_GAP", 0.0)
 
     @patch("get_seat.post_to_get_seat")
     @patch("get_seat.get_seat_info")
@@ -274,3 +284,101 @@ class TestRunSeatReservation:
 
         run_seat_reservation(sample_config, fake_token_mgr)
         assert mock_select.call_count == 2
+
+
+# ========== 放座瞬间并发三连发 ==========
+
+class TestConfirmPacer:
+    """额度闸门：并发调用下也必须守住「每窗口最多 CAP 发」"""
+
+    def test_concurrent_wait_never_exceeds_cap(self, monkeypatch):
+        monkeypatch.setattr("get_seat.CONFIRM_WINDOW", 0.3)
+        monkeypatch.setattr("get_seat.CONFIRM_CAP", 3)
+        pacer = ConfirmPacer()
+        stamps = []
+        lock = threading.Lock()
+
+        def worker():
+            pacer.wait()
+            with lock:
+                stamps.append(time.time())
+
+        threads = [threading.Thread(target=worker) for _ in range(12)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        stamps.sort()
+        # 任意 4 发都不能落在同一个窗口内
+        for i in range(len(stamps) - 3):
+            assert stamps[i + 3] - stamps[i] >= 0.28
+
+
+class TestFirstWindowBurst:
+    """三连发：发送与响应解耦"""
+
+    def test_success_from_any_send(self, sample_config, fake_token_mgr):
+        calls = []
+
+        def fake_confirm(*args, **kwargs):
+            calls.append(time.time())
+            return {"msg": "预约成功"}
+
+        with patch("get_seat._raw_confirm", side_effect=fake_confirm), \
+                patch("get_seat.check_reservation_status", return_value=True):
+            got, sent = _first_window_burst(
+                "198", "9150", 999, sample_config, fake_token_mgr, [], {"open": False})
+
+        assert got is True
+        assert sent == 3
+        assert len(calls) == 3
+
+    def test_slow_response_does_not_block_sends(self, sample_config, fake_token_mgr,
+                                                monkeypatch):
+        monkeypatch.setattr("get_seat.BURST_GAP", 0.2)
+        monkeypatch.setattr("get_seat.BURST_DRAIN", 0.3)
+        started = []
+        release = threading.Event()
+
+        def slow_confirm(*args, **kwargs):
+            started.append(time.time())
+            release.wait(5)
+            return {"msg": "开放预约时间19:20"}
+
+        try:
+            with patch("get_seat._raw_confirm", side_effect=slow_confirm), \
+                    patch("get_seat.check_reservation_status", return_value=False):
+                t0 = time.time()
+                got, sent = _first_window_burst(
+                    "198", "9150", 999, sample_config, fake_token_mgr, [], {"open": False})
+                elapsed = time.time() - t0
+        finally:
+            release.set()
+
+        assert got is False
+        assert sent == 3
+        assert len(started) == 3      # 第一发未返回时，后两发也已经发出
+        assert elapsed < 1.5          # 0.4s 发完 + 0.3s 等结果
+
+
+class TestSelectSeatBurst:
+    """select_seat 在放座瞬间走三连发，而不是单发串行"""
+
+    @patch("get_seat._first_window_burst")
+    @patch("get_seat._warm_up_before_release")
+    @patch("get_seat._mode5_targets")
+    @patch("get_seat.release_epoch")
+    def test_mode5_burst_at_release(self, mock_release, mock_targets, mock_warm,
+                                    mock_burst, sample_config, fake_token_mgr):
+        sample_config.mode = "5"
+        sample_config.seat_id = [198]
+        mock_release.return_value = time.time() + 0.05
+        mock_targets.return_value = [("198", "9150")]
+        mock_warm.return_value = False
+        mock_burst.return_value = (True, 3)
+
+        result = select_seat(49, 999, "2026-10-25", sample_config, fake_token_mgr, [])
+
+        assert result is True
+        mock_burst.assert_called_once()

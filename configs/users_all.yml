@@ -1,0 +1,13 @@
+# 签到签退统一入口 —— 三个账号全量
+# 用途: checkin-students.sh / signout-students.sh
+# 抢座不走本文件 —— book-seat.sh 自己生成 /tmp/userN-booking.yml 并走 src/get_seat.py
+
+users:
+  - config: user1.yml
+    name: "<姓名B> (<学号B>)"
+
+  - config: user2.yml
+    name: "<姓名A> (<学号A>)"
+
+  - config: user3.yml
+    name: "<姓名C> (<学号C>)"

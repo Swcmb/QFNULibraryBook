@@ -1,0 +1,158 @@
+{
+  "jobs": [
+    {
+      "id": "bd7c53c5ed21",
+      "name": "图书馆签到",
+      "prompt": "",
+      "skills": [],
+      "skill": null,
+      "model": null,
+      "provider": null,
+      "base_url": null,
+      "script": "checkin-students.sh",
+      "no_agent": true,
+      "monitor_script": null,
+      "monitor_url": null,
+      "monitor_state": null,
+      "context_from": null,
+      "schedule": {
+        "kind": "cron",
+        "expr": "1 8 * * *",
+        "display": "1 8 * * *"
+      },
+      "schedule_display": "1 8 * * *",
+      "repeat": {
+        "times": null,
+        "completed": 15
+      },
+      "enabled": true,
+      "state": "scheduled",
+      "paused_at": null,
+      "paused_reason": null,
+      "created_at": "2026-10-12T10:53:29.920473+08:00",
+      "next_run_at": "2026-10-28T08:01:00+08:00",
+      "last_run_at": "2026-10-27T08:01:26.392399+08:00",
+      "last_status": "ok",
+      "last_error": null,
+      "last_delivery_error": null,
+      "last_delivery_unverified": null,
+      "last_failure": null,
+      "failure_streak": 0,
+      "deliver": "local",
+      "origin": null,
+      "enabled_toolsets": null,
+      "workdir": null,
+      "last_dispatch": {
+        "scheduled_at": "2026-10-27T08:01:00+08:00",
+        "dispatched_at": "2026-10-27T08:01:08.852490+08:00",
+        "lateness_seconds": 8.9,
+        "kind": "on_time"
+      },
+      "fire_claim": null
+    },
+    {
+      "id": "abeb90a78963",
+      "name": "图书馆抢座",
+      "prompt": "",
+      "skills": [],
+      "skill": null,
+      "model": null,
+      "provider": null,
+      "base_url": null,
+      "script": "book-seat.sh",
+      "no_agent": true,
+      "monitor_script": null,
+      "monitor_url": null,
+      "monitor_state": null,
+      "context_from": null,
+      "schedule": {
+        "kind": "cron",
+        "expr": "18 19 * * *",
+        "display": "18 19 * * *"
+      },
+      "schedule_display": "18 19 * * *",
+      "repeat": {
+        "times": null,
+        "completed": 16
+      },
+      "enabled": true,
+      "state": "scheduled",
+      "paused_at": null,
+      "paused_reason": null,
+      "created_at": "2026-10-12T10:53:40.533044+08:00",
+      "next_run_at": "2026-10-28T19:18:00+08:00",
+      "last_run_at": "2026-10-27T19:21:53.296912+08:00",
+      "last_status": "error",
+      "last_error": "Script exited with code 1\nstderr:\n登录异常 (尝试 1/3): list indices must be integers or slices, not str\nstdout:\n[2026-10-27 19:18:11] 开始抢座...\nconfigs/user2.yml -> /tmp/user2-booking.yml (座位 49)\nconfigs/user1.yml -> /tmp/user1-booking.yml (座位 226)\nconfigs/user3.yml -> /tmp/user3-booking.yml (座位 198)\n临时配置已生成\n[2026-10-27 19:18:11] <姓名C>等待 79s，19:19:30 启动\n<姓名A>(<学号A>->49): 1 | <姓名B>(<学号B>->226): 0 | <姓名C>(<学号C>->198): 1\n[notify] 推送结果: True\n[2026-10-27 19:21:53] 抢座完成\n[2026-10-27 19:21:53] 有账号未抢到座位，返回非零",
+      "last_delivery_error": null,
+      "last_delivery_unverified": null,
+      "last_failure": {
+        "at": "2026-10-27T19:21:53.296912+08:00",
+        "detail": "Script exited with code 1\nstderr:\n登录异常 (尝试 1/3): list indices must be integers or slices, not str\nstdout:\n[2026-10-27 19:18:11] 开始抢座...\nconfigs/user2.yml -> /tmp/user2-booking.yml (座位 49)\nconfigs/user1.yml -> /tmp/user1-booking.yml (座位 226)\nconfigs/user3.yml -> /tmp/user3-booking.yml (座位 198)\n临时配置已生成\n[2026-10-27 19:18:11] <姓名C>等待 79s，19:19:30 启动\n<姓名A>(<学号A>->49): 1 | <姓名B>(<学号B>->226): 0 | <姓名C>(<学号C>->198): 1\n[notify] 推送结果: True\n[2026-10-27 19:21:53] 抢座完成\n[2026-10-27 19:21:53] 有账号未抢到座位，返回非零"
+      },
+      "failure_streak": 1,
+      "deliver": "local",
+      "origin": null,
+      "enabled_toolsets": null,
+      "workdir": null,
+      "last_dispatch": {
+        "scheduled_at": "2026-10-27T19:18:00+08:00",
+        "dispatched_at": "2026-10-27T19:18:08.852598+08:00",
+        "lateness_seconds": 8.9,
+        "kind": "on_time"
+      },
+      "fire_claim": null
+    },
+    {
+      "id": "4717fa4ed367",
+      "name": "图书馆签退",
+      "prompt": "",
+      "skills": [],
+      "skill": null,
+      "model": null,
+      "provider": null,
+      "base_url": null,
+      "script": "signout-students.sh",
+      "no_agent": true,
+      "monitor_script": null,
+      "monitor_url": null,
+      "monitor_state": null,
+      "context_from": null,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 21 * * *",
+        "display": "30 21 * * *"
+      },
+      "schedule_display": "30 21 * * *",
+      "repeat": {
+        "times": null,
+        "completed": 15
+      },
+      "enabled": true,
+      "state": "scheduled",
+      "paused_at": null,
+      "paused_reason": null,
+      "created_at": "2026-10-12T10:53:46.277476+08:00",
+      "next_run_at": "2026-10-27T21:30:00+08:00",
+      "last_run_at": "2026-10-26T21:30:19.400800+08:00",
+      "last_status": "ok",
+      "last_error": null,
+      "last_delivery_error": null,
+      "last_delivery_unverified": null,
+      "last_failure": null,
+      "failure_streak": 0,
+      "deliver": "local",
+      "origin": null,
+      "enabled_toolsets": null,
+      "workdir": null,
+      "last_dispatch": {
+        "scheduled_at": "2026-10-26T21:30:00+08:00",
+        "dispatched_at": "2026-10-26T21:30:08.854840+08:00",
+        "lateness_seconds": 8.9,
+        "kind": "on_time"
+      },
+      "fire_claim": null
+    }
+  ],
+  "updated_at": "2026-10-27T19:21:53.326615+08:00"
+}

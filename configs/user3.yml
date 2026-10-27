@@ -1,0 +1,41 @@
+# 通知渠道选择,分别代表 Telegram、Bark、Anpush、钉钉
+PUSH_METHOD: "DD"
+# 参数：TG / ANPUSH / BARK / DD
+
+# Telegram 相关
+CHANNEL_ID: ""
+TELEGRAM_BOT_TOKEN: ""
+
+# Bark 相关
+BARK_URL: ""
+BARK_EXTRA: ""
+
+# Anpush 相关
+ANPUSH_TOKEN: ""
+ANPUSH_CHANNEL: ""
+
+# 钉钉 token
+DD_BOT_TOKEN: "<redacted>"
+DD_BOT_SECRET: "<redacted>"
+
+# 是否是 Github Action
+GITHUB: false
+
+# 账号授权相关，USERNAME 和 PASSWORD 请填入你的学号和密码
+USERNAME: "<学号C>"
+PASSWORD: "<redacted>"
+
+# 选座模式 ['1', '2', '3', '4']
+# 1 到 3 选座逐渐严格: 1 选择靠近插座且指定范围内的位置, 2 选择靠近插座的位置, 3 随机选择
+# 4: 指定座位优先（第一个为优先座位）
+MODE: '5'
+
+# 指定座位号（MODE=5 时生效，使用座位号而非座位ID）
+SEAT_ID:
+  - 198
+
+CLASSROOMS_NAME:
+  - 东校区图书馆-五楼自习区（南）（东区房间静音）
+
+# 预约时间 ['today', 'tomorrow']
+DATE: "tomorrow"

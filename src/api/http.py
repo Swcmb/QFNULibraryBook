@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def post_with_retry(url, data, headers, max_retries=10, retry_delay=1,
-                    timeout=15, total_timeout=120, session=None):
+                    timeout=15, total_timeout=120, session=None, pre_send=None):
     """
     带重试的 POST 请求。
 
@@ -26,6 +26,9 @@ def post_with_retry(url, data, headers, max_retries=10, retry_delay=1,
         timeout: 单次请求超时秒数（默认 15s）
         total_timeout: 整个重试过程的总超时秒数（默认 120s，到达后放弃）
         session: 可选的 requests.Session 实例，用于连接复用
+        pre_send: 可选回调，在每一次真实发送之前调用（含重试）。
+                  超时重试同样是真实请求，限流闸门必须逐次生效，
+                  不能只在调用层面设闸。
 
     返回:
         解析后的 JSON 响应（字典）
@@ -44,6 +47,8 @@ def post_with_retry(url, data, headers, max_retries=10, retry_delay=1,
             )
 
         try:
+            if pre_send is not None:
+                pre_send()
             http = session.post if session else requests.post
             response = http(url, json=data, headers=headers, timeout=timeout)
 

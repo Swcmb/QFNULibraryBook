@@ -1,0 +1,16 @@
+[Unit]
+Description=QFNU Library Seat Auto-Checkin/Checkout (图书馆签到签退持续守护)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/qfnulibrary
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/qfnulibrary/scripts/loop_seat.sh
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
