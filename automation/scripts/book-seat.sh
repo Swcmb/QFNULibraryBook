@@ -1,6 +1,6 @@
 #!/bin/bash
 # 图书馆抢座 — 三个账号并发抢不同座位（MODE 5 直连，抢不到也不降级）
-# <学号A> (<姓名A>) -> 四楼 49（临时，2026-10-27 改，原目标 三楼 252）
+# <学号A> (<姓名A>) -> 三楼 252（2026-10-31 改回，原目标 四层 61）
 # <学号B> (<姓名B>) -> 三楼 226
 # <学号C> (<姓名C>) -> 五楼 198
 #
@@ -10,6 +10,10 @@
 #   放座瞬间 19:20:00 的三个座位抢法见 get_seat.py 顶部的限流实测注释
 #
 # SUSPEND 配置：在 user1.yml/user2.yml/user3.yml 中设置 SUSPEND: true 可暂停抢座并发送通知
+#
+# 2026-10-31: 临时配置改用 mktemp 唯一目录。此前固定写 /tmp/userN-booking.yml，
+# 一旦存在 root 属主残留（/tmp 有 sticky 位，普通用户删不掉也覆盖不了），
+# cron 任务会在 open(w) 处 PermissionError 直接退出，get_seat.py 一次都不会启动。
 
 cd /home/admin/MyQFNULibraryBook || exit 1
 
@@ -17,11 +21,15 @@ cd /home/admin/MyQFNULibraryBook || exit 1
 PYTHON="$HOME/MyQFNULibraryBook/.venv/bin/python"
 [ -x "$PYTHON" ] || { echo "项目 venv 不存在: $PYTHON" >&2; exit 1; }
 
+# 唯一临时目录：不与其他用户的残留文件碰撞；退出时（含异常）自动清理明文凭据
+TMP_DIR=$(mktemp -d /tmp/seat-booking.XXXXXX) || { echo "创建临时目录失败" >&2; exit 1; }
+trap 'rm -rf "$TMP_DIR"' EXIT
+
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 开始抢座..."
 
 # 生成三个用户的临时配置（固定座位，预约明天）
 # 凭据全部从 configs/userN.yml 继承，此处只覆盖抢座相关字段
-$PYTHON << 'PYEOF'
+TMP_DIR="$TMP_DIR" $PYTHON << 'PYEOF'
 import os
 import sys
 import yaml
@@ -31,15 +39,16 @@ from config.config import AppConfig
 
 # 学号 -> (目标座位号, 目标区域)
 TARGETS = {
-    '<学号A>': (49, '东校区图书馆-四层中文现刊室'),
+    '<学号A>': (252, '东校区图书馆-三层自习室'),
     '<学号B>': (226, '东校区图书馆-三层自习室'),
     '<学号C>': (198, '东校区图书馆-五楼自习区（南）（东区房间静音）'),
 }
 
-for source_file, tmp_file in [
-    ('configs/user2.yml', '/tmp/user2-booking.yml'),
-    ('configs/user1.yml', '/tmp/user1-booking.yml'),
-    ('configs/user3.yml', '/tmp/user3-booking.yml'),
+tmp_dir = os.environ['TMP_DIR']
+for source_file, tmp_name in [
+    ('configs/user2.yml', 'user2-booking.yml'),
+    ('configs/user1.yml', 'user1-booking.yml'),
+    ('configs/user3.yml', 'user3-booking.yml'),
 ]:
     cfg = AppConfig.from_yaml(source_file)
     seat_id, classroom = TARGETS[cfg.username]
@@ -58,6 +67,7 @@ for source_file, tmp_file in [
         'CLASSROOMS_NAME': [classroom],
         'SUSPEND': cfg.suspend,
     }
+    tmp_file = os.path.join(tmp_dir, tmp_name)
     with open(tmp_file, 'w') as f:
         yaml.dump(data, f, allow_unicode=True)
     # 临时配置含明文密码与钉钉凭据，立即收紧到 600
@@ -72,14 +82,17 @@ if [ $? -ne 0 ]; then
 fi
 
 # ---- SUSPEND 检查 ----
-$PYTHON << 'PYEOF'
+TMP_DIR="$TMP_DIR" $PYTHON << 'PYEOF'
+import os
 import sys
 sys.path.insert(0, '/home/admin/MyQFNULibraryBook/src')
 from notify.notify import send_message
 from config.config import AppConfig
 
+tmp_dir = os.environ['TMP_DIR']
 suspended = False
-for cfg_file in ['/tmp/user2-booking.yml', '/tmp/user1-booking.yml', '/tmp/user3-booking.yml']:
+for name in ['user2-booking.yml', 'user1-booking.yml', 'user3-booking.yml']:
+    cfg_file = os.path.join(tmp_dir, name)
     try:
         config = AppConfig.from_yaml(cfg_file)
         if config.suspend:
@@ -100,9 +113,9 @@ fi
 
 # 并发抢座（各自输出留档，便于事后核查）
 # <姓名A>、<姓名B>立即启动
-$PYTHON src/get_seat.py -c /tmp/user2-booking.yml > /tmp/seat-<学号A>.log 2>&1 &
+$PYTHON src/get_seat.py -c "$TMP_DIR/user2-booking.yml" > /tmp/seat-<学号A>.log 2>&1 &
 PID_A=$!
-$PYTHON src/get_seat.py -c /tmp/user1-booking.yml > /tmp/seat-<学号B>.log 2>&1 &
+$PYTHON src/get_seat.py -c "$TMP_DIR/user1-booking.yml" > /tmp/seat-<学号B>.log 2>&1 &
 PID_B=$!
 
 # <姓名C>睡到绝对时刻 19:19:30 再启动。用绝对时刻而不是固定 sleep，
@@ -116,7 +129,7 @@ PID_B=$!
     else
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] 已过 19:19:30，<姓名C>立即启动"
     fi
-    $PYTHON src/get_seat.py -c /tmp/user3-booking.yml > /tmp/seat-<学号C>.log 2>&1
+    $PYTHON src/get_seat.py -c "$TMP_DIR/user3-booking.yml" > /tmp/seat-<学号C>.log 2>&1
 ) &
 PID_C=$!
 
@@ -127,13 +140,13 @@ RC_B=$?
 wait $PID_C
 RC_C=$?
 
-echo "<姓名A>(<学号A>->49): $RC_A | <姓名B>(<学号B>->226): $RC_B | <姓名C>(<学号C>->198): $RC_C"
+echo "<姓名A>(<学号A>->252): $RC_A | <姓名B>(<学号B>->226): $RC_B | <姓名C>(<学号C>->198): $RC_C"
 
 # ---- 抢座结束后，把结果推送到钉钉 ----
 $PYTHON /home/admin/.hermes/scripts/seat-notify.py \
     --users configs/user2.yml configs/user1.yml configs/user3.yml
 
-rm -f /tmp/user1-booking.yml /tmp/user2-booking.yml /tmp/user3-booking.yml
+# 临时配置由 EXIT trap 统一清理
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 抢座完成"
 
 # 退出码必须反映真实结果。原实现无条件 exit 0，把 2026-10-18 <姓名A>丢座
