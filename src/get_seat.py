@@ -579,6 +579,11 @@ def select_seat(build_id, segment, nowday, config, token_mgr, messages):
                     break
                 if gate.get('blocked') and holds_target_seat(config, token_mgr,
                                                               seat_no, nowday):
+                    # 「本人已持有」分支此前只判定完成、不写 messages，而单独通知由
+                    # run_seat_reservation 的 `if messages:` 触发，所以这条路径静默无推送
+                    # （2026-11-01 <姓名C> 的 198 已到手却没有收到通知）。
+                    # 与正常成功路径保持一致，交由 check_book_seat 补写成功文案。
+                    check_book_seat(config, token_mgr, messages, token_mgr.get_token())
                     flag = True
                     break
                 logger.info(f"座位 {seat_no} 本次未成功，继续重试")
