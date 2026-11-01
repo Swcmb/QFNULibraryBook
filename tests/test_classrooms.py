@@ -8,13 +8,13 @@ class TestClassroomIdMapping:
     """教室名称到 ID 的映射"""
 
     def test_mapping_entry_count(self):
-        """共 22 个条目（18 主要 + 4 别名）"""
-        assert len(classroom_id_mapping) == 22
+        """共 23 个条目（19 主要 + 4 别名）"""
+        assert len(classroom_id_mapping) == 23
 
     def test_primary_classrooms_unique_ids(self):
-        """去除别名后，唯一 ID 数量为 18"""
+        """去除别名后，唯一 ID 数量为 19"""
         unique_ids = set(classroom_id_mapping.values())
-        assert len(unique_ids) == 18
+        assert len(unique_ids) == 19
 
     def test_alias_resolves_correctly(self):
         """别名映射到正确的 ID"""
@@ -35,6 +35,8 @@ class TestClassroomIdMapping:
         assert classroom_id_mapping["西校区图书馆-二层自习室"] == 45
         assert classroom_id_mapping["行政楼-四层东区自习室"] == 13
         assert classroom_id_mapping["电视台楼-二层自习室"] == 12
+        # 2026-10-27 新增的房间，条目计数从 18/22 升到 19/23 就是由它引起的
+        assert classroom_id_mapping["东校区图书馆-四层中文现刊室"] == 24
 
 
 class TestExcludeId:
